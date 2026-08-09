@@ -113,6 +113,7 @@ const LoginPage = () => {
       if (userRole === 'owner') {
         localStorage.setItem('cargolink_owner_user', JSON.stringify(localStorageUser));
       } else if (userRole === 'driver') {
+        localStorage.removeItem('cargolink_driver_profile');
         localStorage.setItem('cargolink_driver_user', JSON.stringify(localStorageUser));
       } else if (userRole === 'admin') {
         localStorage.setItem('cargolink_admin_user', JSON.stringify(localStorageUser));
@@ -429,7 +430,7 @@ const LoginPage = () => {
                   <label className="text-poppins font-medium text-brown" style={{ fontSize: '0.78rem' }}>Full Name *</label>
                   <div className="input-icon-wrapper">
                     <User size={16} className="input-icon" />
-                    <input className="input-field-custom" placeholder="John Doe" value={fullName} onChange={e => setFullName(e.target.value)} />
+                    <input className="input-field-custom" placeholder="Full Name" value={fullName} onChange={e => setFullName(e.target.value)} />
                   </div>
                 </div>
 

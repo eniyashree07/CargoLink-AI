@@ -104,6 +104,8 @@ NODE_ENV=development
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/cargolink?retryWrites=true&w=majority
 ```
 
+> In MongoDB Atlas, make sure your current IP address is added to the cluster IP access list under Network Access. For development, you can temporarily allow `0.0.0.0/0`.
+
 **Start Backend Server:**
 
 ```bash

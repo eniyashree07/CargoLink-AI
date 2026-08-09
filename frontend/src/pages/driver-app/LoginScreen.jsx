@@ -3,6 +3,7 @@ import {
   Mail, Lock, Phone, User, CreditCard, Truck, ShieldCheck, Building,
   FileText, MapPin, BadgeCheck, AlertCircle, Eye, EyeOff, CheckCircle2
 } from 'lucide-react';
+import { authService } from '../../services/authService';
 
 const LoginScreen = ({ onNext }) => {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
@@ -43,7 +44,7 @@ const LoginScreen = ({ onNext }) => {
   const validateEmail = (val) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
   const validateMobile = (val) => /^\d{10}$/.test(val.replace(/\D/g, ''));
 
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -61,64 +62,47 @@ const LoginScreen = ({ onNext }) => {
       return;
     }
 
-    const persistedAdmin = role === 'admin'
-      ? JSON.parse(localStorage.getItem('cargolink_admin_user') || 'null')
-      : null;
-    const persistedOwner = role === 'owner'
-      ? JSON.parse(localStorage.getItem('cargolink_owner_user') || 'null')
-      : null;
-    const persistedDriver = role === 'driver'
-      ? JSON.parse(localStorage.getItem('cargolink_driver_user') || 'null')
-      : null;
+    try {
+      const response = await authService.login(loginIdentifier.trim(), loginPassword);
+      const user = response.user || {};
+      const userRole = (user.role || role).toLowerCase();
+      const fullName = user.fullName || (loginIdentifier.includes('@') ? loginIdentifier.split('@')[0] : 'User');
 
-    const userNameFromStorage = role === 'admin'
-      ? persistedAdmin?.name || persistedAdmin?.fullName
-      : role === 'owner'
-      ? persistedOwner?.ownerName || persistedOwner?.name || persistedOwner?.fullName
-      : role === 'driver'
-      ? persistedDriver?.name || persistedDriver?.fullName
-      : null;
+      // Clear any previous session so a fresh login never shows an old user's name
+      localStorage.removeItem('cargolink_owner_user');
+      localStorage.removeItem('cargolink_admin_user');
+      localStorage.removeItem('cargolink_driver_user');
+      localStorage.removeItem('cargolink_driver_profile');
 
-    const userData = {
-      identifier: loginIdentifier.trim(),
-      name: userNameFromStorage || (loginIdentifier.includes('@') ? loginIdentifier.split('@')[0] : 'User'),
-      role: role,
-      isLoggedIn: true,
-      rememberMe: rememberMe,
-      loginTime: new Date().toISOString()
-    };
+      const userData = {
+        identifier: loginIdentifier.trim(),
+        name: fullName,
+        fullName,
+        email: user.email || '',
+        phone: user.mobile || '',
+        role: userRole,
+        isLoggedIn: true,
+        rememberMe: rememberMe,
+        loginTime: new Date().toISOString(),
+        user
+      };
 
-    localStorage.setItem('cargolink_user', JSON.stringify(userData));
-    if (role === 'owner') {
-      localStorage.setItem('cargolink_owner_user', JSON.stringify({
-        ...userData,
-        ownerName: userData.name,
-        companyName: companyName || persistedOwner?.companyName || ''
-      }));
-    } else if (role === 'admin') {
-      localStorage.setItem('cargolink_admin_user', JSON.stringify({
-        ...userData,
-        employeeId: employeeId || persistedAdmin?.employeeId || '',
-        fullName: userData.name,
-        email: email || persistedAdmin?.email || ''
-      }));
-    } else {
-      localStorage.setItem('cargolink_driver_user', JSON.stringify({
-        ...userData,
-        fullName: userData.name
-      }));
+      localStorage.setItem('cargolink_user', JSON.stringify(userData));
+      localStorage.setItem('cargolink_driver_user', JSON.stringify({ ...userData, fullName }));
+
+      setSuccessMsg(`Welcome back ${fullName}! Logging in...`);
+
+      setTimeout(() => {
+        if (typeof onNext === 'function') {
+          onNext(userData);
+        }
+      }, 600);
+    } catch (err) {
+      setErrorMsg(err.message || 'Login failed. Please check your credentials.');
     }
-
-    setSuccessMsg(`Welcome back! Logging in as ${role.toUpperCase()}...`);
-
-    setTimeout(() => {
-      if (typeof onNext === 'function') {
-        onNext(userData);
-      }
-    }, 600);
   };
 
-  const handleRegisterSubmit = (e) => {
+  const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -176,24 +160,42 @@ const LoginScreen = ({ onNext }) => {
       }
     }
 
-const persistedAdmin = role === 'admin'
-        ? JSON.parse(localStorage.getItem('cargolink_admin_user') || 'null')
-        : null;
-      const persistedOwner = role === 'owner'
-        ? JSON.parse(localStorage.getItem('cargolink_owner_user') || 'null')
-        : null;
-      const persistedDriver = role === 'driver'
-        ? JSON.parse(localStorage.getItem('cargolink_driver_user') || 'null')
-        : null;
+    try {
+      const response = await authService.register({
+        fullName: role === 'owner' ? ownerName : fullName,
+        mobile: mobileNumber,
+        email: email,
+        password: password,
+        role: role.toUpperCase(),
+        drivingLicence: role === 'driver' ? drivingLicence : undefined,
+        truckNumber: role === 'driver' ? truckNumber : undefined,
+        vehicleType: role === 'driver' ? vehicleType : undefined,
+        ownerName: role === 'owner' ? ownerName : undefined,
+        companyName: role === 'owner' ? companyName : undefined,
+        gstNumber: role === 'owner' ? gstNumber : undefined,
+        companyAddress: role === 'owner' ? companyAddress : undefined,
+        employeeId: role === 'admin' ? employeeId : undefined
+      });
+
+      const registeredUser = response.user || {};
+      const registeredRole = (registeredUser.role || role).toLowerCase();
+
+      // Clear any previous session so a fresh login never shows an old user's name
+      localStorage.removeItem('cargolink_owner_user');
+      localStorage.removeItem('cargolink_admin_user');
+      localStorage.removeItem('cargolink_driver_user');
+      localStorage.removeItem('cargolink_driver_profile');
 
       const userData = {
         name: nameToValidate,
+        fullName: nameToValidate,
         email: email,
         phone: mobileNumber,
-        role: role,
+        role: registeredRole,
         isLoggedIn: true,
         rememberMe: true,
-        loginTime: new Date().toISOString()
+        loginTime: new Date().toISOString(),
+        user: registeredUser
       };
 
       localStorage.setItem('cargolink_user', JSON.stringify(userData));
@@ -201,24 +203,24 @@ const persistedAdmin = role === 'admin'
         localStorage.setItem('cargolink_owner_user', JSON.stringify({
           ...userData,
           ownerName: nameToValidate,
-          companyName: companyName || persistedOwner?.companyName || '',
-          gstNumber: gstNumber || persistedOwner?.gstNumber || '',
-          companyAddress: companyAddress || persistedOwner?.companyAddress || ''
+          companyName,
+          gstNumber,
+          companyAddress
         }));
       } else if (role === 'admin') {
         localStorage.setItem('cargolink_admin_user', JSON.stringify({
           ...userData,
           name: nameToValidate,
           fullName: nameToValidate,
-          employeeId: employeeId || persistedAdmin?.employeeId || '',
-          email: email || persistedAdmin?.email || ''
+          employeeId: employeeId || '',
+          email: email
         }));
       } else {
         localStorage.setItem('cargolink_driver_user', JSON.stringify({
           ...userData,
           fullName: nameToValidate
         }));
-    }
+      }
 
     setSuccessMsg(`Account registered successfully as ${role.toUpperCase()}! Redirecting...`);
 
@@ -227,6 +229,9 @@ const persistedAdmin = role === 'admin'
         onNext(userData);
       }
     }, 700);
+    } catch (err) {
+      setErrorMsg(err.message || 'Registration failed. Please try again.');
+    }
   };
 
   return (
@@ -427,7 +432,7 @@ const persistedAdmin = role === 'admin'
                     <label className="text-poppins font-medium text-brown" style={{ fontSize: '0.75rem' }}>Full Name *</label>
                     <div style={{ position: 'relative' }}>
                       <User size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', opacity: 0.6 }} />
-                      <input className="input-premium" style={{ paddingLeft: '38px', padding: '0.75rem 0.75rem 0.75rem 38px' }} placeholder="John Doe" value={fullName} onChange={e => setFullName(e.target.value)} />
+                      <input className="input-premium" style={{ paddingLeft: '38px', padding: '0.75rem 0.75rem 0.75rem 38px' }} placeholder="Full Name" value={fullName} onChange={e => setFullName(e.target.value)} />
                     </div>
                   </div>
 

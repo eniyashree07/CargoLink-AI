@@ -158,13 +158,26 @@ const CreateLoadView = ({ setActiveNav, onLoadCreated }) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const savedUser = localStorage.getItem('cargolink_owner_user') || localStorage.getItem('cargolink_user');
+      let cargoOwnerId = null;
+      if (savedUser) {
+        const parsed = JSON.parse(savedUser);
+        cargoOwnerId = parsed.id || parsed._id || parsed.user?.id || parsed.user?._id;
+      }
+      if (!cargoOwnerId) {
+        throw new Error('Owner profile not found. Please log in again.');
+      }
       await tripService.createTrip({
         origin: formData.pickup,
         destination: formData.dropoff,
         cargoType: formData.goodsType,
         weight: parseFloat(formData.weight),
         truckType: formData.truckType,
-        status: 'PENDING'
+        status: 'PENDING',
+        cargoOwnerId,
+        distance: Math.floor(Math.random() * 500 + 50),
+        estimatedDuration: Math.floor(Math.random() * 10 + 2),
+        cost: parseFloat(formData.weight) * (Math.floor(Math.random() * 20 + 10))
       });
       setAssignedSuccess(true);
       setIsSubmitting(false);
@@ -369,18 +382,57 @@ const AIDriverRecommendationView = ({ setActiveNav, drivers }) => {
 /* ═══════════════════════════════════════════════════════════════
    3. ASSIGN DRIVER VIEW
    ═══════════════════════════════════════════════════════════════ */
-const AssignDriverView = ({ setActiveNav, drivers }) => {
+const AssignDriverView = ({ setActiveNav, drivers, trips, onRefresh }) => {
   const [assignedSuccess, setAssignedSuccess] = useState(false);
+  const [assignError, setAssignError] = useState(null);
   const [selectedDriver, setSelectedDriver] = useState(null);
+  const [selectedTripId, setSelectedTripId] = useState(null);
+  const [isAssigning, setIsAssigning] = useState(false);
 
-  const handleAssign = (driver) => {
-    setSelectedDriver(driver.name);
-    setAssignedSuccess(true);
-    setTimeout(() => {
-      setAssignedSuccess(false);
-      setSelectedDriver(null);
-      if (setActiveNav) setActiveNav('trips');
-    }, 1200);
+  const pendingTrips = trips.filter(t => {
+    const s = (t.status || '').toUpperCase();
+    return s === 'PENDING';
+  });
+
+  useEffect(() => {
+    if (pendingTrips.length > 0 && !selectedTripId) {
+      setSelectedTripId(pendingTrips[0]._id || pendingTrips[0].id);
+    }
+  }, [pendingTrips]);
+
+  const getDriverId = (driver) => {
+    return driver._id || driver.id || (driver.userId && driver.userId._id) || null;
+  };
+
+  const handleAssign = async (driver) => {
+    if (!selectedTripId) {
+      setAssignError('Please select a trip first');
+      return;
+    }
+    const driverId = getDriverId(driver);
+    if (!driverId) {
+      setAssignError('Driver ID not found. The driver may not be properly registered.');
+      return;
+    }
+    setIsAssigning(true);
+    setAssignError(null);
+    try {
+      await tripService.assignDriver(selectedTripId, driverId);
+      const driverName = driver.userId?.fullName || driver.fullName || driver.name || 'Driver';
+      setSelectedDriver(driverName);
+      setAssignedSuccess(true);
+      if (onRefresh) onRefresh();
+      setTimeout(() => {
+        setAssignedSuccess(false);
+        setSelectedDriver(null);
+        setSelectedTripId(null);
+        if (setActiveNav) setActiveNav('trips');
+      }, 1500);
+    } catch (error) {
+      setAssignError(error.message || 'Failed to assign driver');
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   return (
@@ -391,7 +443,7 @@ const AssignDriverView = ({ setActiveNav, drivers }) => {
             <UserPlus size={24} color="var(--ow-brown)" />
             <h2 className="od-section-title" style={{ margin: 0 }}>Assign Driver</h2>
           </div>
-          <p className="od-page-sub">Match and dispatch available drivers to confirmed shipments.</p>
+          <p className="od-page-sub">Select a pending trip and assign an available driver.</p>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           <button className="od-btn ghost" onClick={() => setActiveNav && setActiveNav('ai')}>← AI Recommendation</button>
@@ -399,49 +451,105 @@ const AssignDriverView = ({ setActiveNav, drivers }) => {
         </div>
       </div>
 
-      <div className="od-card" style={{ padding: 24, marginBottom: 24, borderLeft: '4px solid var(--ow-brown)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <h4 style={{ margin: 0, color: 'var(--ow-text-dark)', fontSize: '1.05rem' }}>Shipment TR-8102 (Salem → Kochi)</h4>
-          <span className="od-status-chip pending"><span className="od-status-dot" /> Awaiting Dispatch</span>
+      {assignError && (
+        <div className="od-cl-success-banner" style={{ marginBottom: 20, background: '#FEF2F2', color: 'var(--ow-danger)', borderColor: 'rgba(239,68,68,0.2)' }}>
+          <AlertTriangle size={20} />
+          <span>{assignError}</span>
         </div>
-        <div style={{ display: 'flex', gap: 24, fontSize: '0.85rem', color: 'var(--ow-text-muted)' }}>
-          <div><strong>Cargo:</strong> Industrial Equipment (12 Tons)</div>
-          <div><strong>Required Truck:</strong> Open container</div>
-          <div><strong>Pickup:</strong> Tomorrow, 10:00 AM</div>
-        </div>
-      </div>
+      )}
 
       {assignedSuccess && (
         <div className="od-cl-success-banner" style={{ marginBottom: 20 }}>
           <CheckCircle2 size={20} color="var(--ow-success)" />
-          <span>Driver {selectedDriver} assigned successfully! Dispatch notification sent. Redirecting to Trips...</span>
+          <span>Driver {selectedDriver} assigned successfully! Redirecting to Trips...</span>
         </div>
       )}
 
+      {/* Trip Selection */}
+      <div className="od-card" style={{ padding: 24, marginBottom: 24, borderLeft: '4px solid var(--ow-brown)' }}>
+        <h4 style={{ margin: '0 0 12px', color: 'var(--ow-text-dark)', fontSize: '1rem' }}>Select Pending Trip</h4>
+        {pendingTrips.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {pendingTrips.map(trip => {
+              const tripId = trip._id || trip.id;
+              const isSelected = selectedTripId === tripId;
+              return (
+                <div
+                  key={tripId}
+                  onClick={() => { setSelectedTripId(tripId); setAssignError(null); }}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    padding: '14px 16px', borderRadius: 'var(--radius-sm)',
+                    border: `1.5px solid ${isSelected ? 'var(--ow-brown)' : 'var(--ow-border)'}`,
+                    background: isSelected ? 'var(--ow-brown-light)' : 'var(--ow-bg)',
+                    cursor: 'pointer', transition: 'var(--transition)'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--ow-text-dark)', fontSize: '0.9rem' }}>
+                      {trip.origin || trip.from || 'N/A'} → {trip.destination || trip.to || 'N/A'}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--ow-text-muted)', marginTop: 4 }}>
+                      {trip.cargoType || 'N/A'} · {trip.weight ? `${trip.weight}T` : 'N/A'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--ow-text-muted)' }}>
+                      ₹{trip.amount || trip.price || trip.cost || 'N/A'}
+                    </span>
+                    {isSelected && <CheckCircle2 size={18} color="var(--ow-brown)" />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--ow-text-muted)' }}>
+            <p>No pending trips available. Create a load first.</p>
+          </div>
+        )}
+      </div>
+
+      {/* Driver Selection */}
+      <h4 style={{ margin: '0 0 16px', color: 'var(--ow-text-dark)', fontSize: '1rem' }}>
+        Available Drivers {!selectedTripId && <span style={{ fontWeight: 400, fontSize: '0.82rem', color: 'var(--ow-text-light)' }}>(select a trip above)</span>}
+      </h4>
+
       <div className="od-driver-cards-grid">
-        {(drivers.length > 0 ? drivers : DRIVERS).map((d, i) => (
-          <div key={i} className="od-card od-cl-driver-card">
+        {(drivers.length > 0 ? drivers : DRIVERS).map((d, i) => {
+          const driverName = d.userId?.fullName || d.fullName || d.name || 'Unknown Driver';
+          const initials = driverName.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+          const isAvailable = (d.status || '').toUpperCase() === 'AVAILABLE';
+          return (
+          <div key={d._id || i} className="od-card od-cl-driver-card" style={{ opacity: isAvailable ? 1 : 0.5 }}>
             <div className="od-cl-driver-top">
-              <div className="od-driver-avatar lg">{d.initials || d.name?.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}</div>
+              <div className="od-driver-avatar lg">{initials}</div>
               <div className="od-cl-driver-info">
-                <h4>{d.name}</h4>
+                <h4>{driverName}</h4>
                 <div className="od-driver-rating"><Star size={13} fill="var(--ow-brown)" color="var(--ow-brown)"/> {d.rating || 'N/A'}</div>
               </div>
-              <div className="od-cl-driver-status">{d.status?.includes('Available') ? 'Available' : d.status === 'ON_TRIP' ? 'On Trip' : d.status || 'Unknown'}</div>
+              <div className="od-cl-driver-status" style={{ background: isAvailable ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: isAvailable ? 'var(--ow-success)' : 'var(--ow-danger)' }}>{isAvailable ? 'Available' : d.status === 'ON_TRIP' ? 'On Trip' : d.status || 'Unavailable'}</div>
             </div>
             
             <div className="od-cl-driver-meta" style={{ marginTop: 8 }}>
               <div className="meta-item"><span>Truck No:</span> {d.truckNumber || 'N/A'}</div>
-              <div className="meta-item"><span>Status:</span> {d.status}</div>
-              <div className="meta-item"><span>Proximity:</span> {12 + i * 5} KM from pickup hub</div>
+              <div className="meta-item"><span>Vehicle:</span> {d.vehicleType || 'N/A'}</div>
+              <div className="meta-item"><span>Status:</span> {isAvailable ? 'Available' : d.status || 'Unavailable'}</div>
             </div>
             
             <div className="od-cl-driver-actions">
-              <button className="od-btn ghost sm" onClick={() => setActiveNav && setActiveNav('drivers')}>Driver Profile</button>
-              <button className="od-btn primary sm" onClick={() => handleAssign(d)}>Confirm Assignment</button>
+              <button className="od-btn ghost sm" onClick={() => setActiveNav && setActiveNav('drivers')}>View Profile</button>
+              <button
+                className="od-btn primary sm"
+                onClick={() => handleAssign(d)}
+                disabled={!selectedTripId || !isAvailable || isAssigning}
+                style={{ opacity: (!selectedTripId || !isAvailable || isAssigning) ? 0.5 : 1 }}
+              >
+                {isAssigning ? 'Assigning...' : 'Confirm Assignment'}
+              </button>
             </div>
           </div>
-        ))}
+        )})}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32, paddingTop: 20, borderTop: '1px solid var(--ow-border)' }}>
@@ -485,7 +593,7 @@ const TripsPageView = ({ setActiveNav, trips }) => {
               const tripId = trip.id || trip._id || 'N/A';
               const tripFrom = trip.origin || trip.from || 'N/A';
               const tripTo = trip.destination || trip.to || 'N/A';
-              const tripDriver = trip.driver || (trip.driverId?.fullName || 'Unassigned');
+              const tripDriver = trip.driver || trip.driverId?.userId?.fullName || trip.driverId?.fullName || 'Unassigned';
               const tripStatus = trip.status === 'IN_TRANSIT' ? 'in-transit' : trip.status === 'PENDING' ? 'pending' : trip.status === 'DELIVERED' ? 'completed' : trip.status === 'DELAYED' ? 'delayed' : (trip.status || 'pending');
               const tripProgress = trip.progress || (tripStatus === 'completed' ? 100 : tripStatus === 'in-transit' ? 50 : 0);
               const tripEta = trip.eta || 'N/A';
@@ -1765,7 +1873,7 @@ const OwnerDashboard = () => {
           ) : activeNav === 'ai' ? (
             <AIDriverRecommendationView setActiveNav={setActiveNav} drivers={drivers} />
           ) : activeNav === 'assign' ? (
-            <AssignDriverView setActiveNav={setActiveNav} drivers={drivers} />
+            <AssignDriverView setActiveNav={setActiveNav} drivers={drivers} trips={trips} onRefresh={handleRefresh} />
           ) : activeNav === 'trips' ? (
             <TripsPageView setActiveNav={setActiveNav} trips={trips} />
           ) : activeNav === 'tracking' ? (
@@ -1784,35 +1892,24 @@ const OwnerDashboard = () => {
             <>
               {/* Welcome Banner */}
               <div className="od-welcome-banner">
-                <div className="od-banner-bg-circle c1" />
-                <div className="od-banner-bg-circle c2" />
-                <div className="od-banner-bg-circle c3" />
-
                 <div className="od-banner-left">
                   <div className="od-banner-greeting">{t('goodEvening')}</div>
-                  <h1 className="od-banner-title">{t('welcomeBack')} {profileData.companyName} 👋</h1>
+                  <h1 className="od-banner-title">{t('welcomeBack')} {profileData.companyName}</h1>
                   <p className="od-banner-subtitle">
                     Your fleet at a glance. Create loads, assign drivers, and track shipments.
                   </p>
-                  <button 
-                    className="od-btn primary" 
-                    style={{ marginTop: 16, display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                    onClick={() => setActiveNav('loads')}
-                  >
-                    Start Flow: {t('loads')} →
-                  </button>
                 </div>
 
                 <div className="od-banner-right">
-                  <div className="od-banner-stat" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('trips')}>
+                  <div className="od-banner-stat" onClick={() => setActiveNav('trips')}>
                     <span className="od-banner-stat-val">{dashboardData?.activeTrips ?? trips.filter(t => ['IN_TRANSIT','ASSIGNED'].includes(t.status)).length}</span>
                     <span className="od-banner-stat-label">{t('activeTrips')}</span>
                   </div>
-                  <div className="od-banner-stat" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('analytics')}>
+                  <div className="od-banner-stat" onClick={() => setActiveNav('analytics')}>
                     <span className="od-banner-stat-val">{dashboardData?.completedTrips ?? trips.filter(t => t.status === 'DELIVERED').length}</span>
                     <span className="od-banner-stat-label">{t('thisMonth')}</span>
                   </div>
-                  <div className="od-banner-stat" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('analytics')}>
+                  <div className="od-banner-stat" onClick={() => setActiveNav('analytics')}>
                     <span className="od-banner-stat-val">{trips.length > 0 ? Math.round((trips.filter(t => t.status === 'DELIVERED').length / trips.length) * 100) : 0}%</span>
                     <span className="od-banner-stat-label">{t('onTimeSla')}</span>
                   </div>
@@ -1928,7 +2025,7 @@ const OwnerDashboard = () => {
                         const tripId = trip.id || trip._id || 'N/A';
                         const tripFrom = trip.origin || trip.from || 'N/A';
                         const tripTo = trip.destination || trip.to || 'N/A';
-                        const tripDriver = trip.driver || (trip.driverId?.fullName || 'Unassigned');
+              const tripDriver = trip.driver || trip.driverId?.userId?.fullName || trip.driverId?.fullName || 'Unassigned';
                         const tripStatus = trip.status === 'IN_TRANSIT' ? 'in-transit' : trip.status === 'PENDING' ? 'pending' : trip.status === 'DELIVERED' ? 'completed' : trip.status === 'DELAYED' ? 'delayed' : (trip.status || 'pending');
                         const tripProgress = trip.progress || (tripStatus === 'completed' ? 100 : tripStatus === 'in-transit' ? 50 : 0);
                         const tripEta = trip.eta || 'N/A';
@@ -2182,7 +2279,7 @@ const OwnerDashboard = () => {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                       {[
                         { label: 'Trip ID', val: trips[0]._id || trips[0].id || 'N/A' },
-                        { label: 'Driver', val: trips[0].driver?.fullName || trips[0].driver || 'Unassigned' },
+                        { label: 'Driver', val: trips[0].driver?.fullName || trips[0].driverId?.userId?.fullName || trips[0].driverId?.fullName || trips[0].driver || 'Unassigned' },
                         { label: 'Cargo', val: trips[0].cargoType || 'N/A' },
                         { label: 'Weight', val: trips[0].weight ? `${trips[0].weight}T` : 'N/A' },
                         { label: 'Status', val: trips[0].status || 'N/A' },

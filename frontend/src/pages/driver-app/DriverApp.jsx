@@ -85,6 +85,7 @@ const DriverApp = () => {
     try {
       localStorage.removeItem('cargolink_user');
       localStorage.removeItem('cargolink_driver_user');
+      localStorage.removeItem('cargolink_driver_profile');
     } catch (e) {}
     setCurrentScreen('login');
   };

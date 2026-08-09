@@ -1887,7 +1887,7 @@ const AdminDashboard = () => {
                         const tripFrom = trip.origin || trip.from || 'N/A';
                         const tripTo = trip.destination || trip.to || 'N/A';
                         const tripStatus = trip.status === 'IN_TRANSIT' ? 'in-transit' : trip.status === 'PENDING' ? 'scheduled' : trip.status === 'DELIVERED' ? 'completed' : trip.status === 'DELAYED' ? 'delayed' : (trip.status || 'scheduled');
-                        const tripDriver = trip.driver?.fullName || trip.driver || 'Unassigned';
+                        const tripDriver = trip.driver?.fullName || trip.driverId?.userId?.fullName || trip.driverId?.fullName || trip.driver || 'Unassigned';
                         const tripOwner = trip.cargoOwnerId?.companyName || trip.cargo || trip.cargoOwnerId?.fullName || 'N/A';
                         return (
                         <tr key={tripId}>

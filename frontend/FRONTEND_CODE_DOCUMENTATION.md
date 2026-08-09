@@ -75,7 +75,7 @@ export default defineConfig({
 
 **Content:**
 ```
-VITE_API_URL=http://localhost:8080
+VITE_API_URL=http://localhost:5000
 ```
 
 **Explanation:** 
@@ -517,7 +517,7 @@ This dashboard provides administrators with a bird's-eye view of the entire plat
 ```javascript
 class ApiClient {
   constructor() {
-    this.baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080'
+    this.baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
   }
 
   getToken() {

@@ -41,7 +41,7 @@ Before running this project, ensure you have:
 
 - **Node.js** (version 16 or higher)
 - **npm** or **yarn** package manager
-- **Backend API** running on `http://localhost:8080` (if using full stack)
+- **Backend API** running on `http://localhost:5000` (if using full stack)
 
 ## 📦 Installation
 
@@ -69,7 +69,7 @@ yarn install
 Create a `.env` file in the root directory:
 
 ```env
-VITE_API_URL=http://localhost:8080
+VITE_API_URL=http://localhost:5000
 ```
 
 **Note:** The `.env.example` file is provided as a template.
@@ -169,7 +169,7 @@ CargoLINK/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VITE_API_URL` | Backend API base URL | `http://localhost:8080` |
+| `VITE_API_URL` | Backend API base URL | `http://localhost:5000` |
 
 ### Vite Configuration
 
@@ -404,7 +404,7 @@ The frontend is configured to connect to a backend API. All API calls go through
 
 **Base URL:** Configured via `VITE_API_URL` environment variable
 
-**Default:** `http://localhost:8080`
+**Default:** `http://localhost:5000`
 
 ## 📱 Responsive Design
 

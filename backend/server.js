@@ -15,27 +15,54 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Database Connection
-const dbUri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/cargolink';
+const dbUri = process.env.MONGODB_URI?.trim();
+const fallbackDbUri = 'mongodb://127.0.0.1:27017/cargolink';
 mongoose.set('strictQuery', false);
 
-mongoose.connect(dbUri, {
+const mongooseOptions = {
   serverSelectionTimeoutMS: 10000,
   connectTimeoutMS: 10000,
-})
-  .then(() => {
-    console.log('MongoDB Connected Successfully');
-  })
-  .catch((err) => {
-    console.error('MongoDB Connection Error: MongoDB is not available at', dbUri);
+};
+
+async function connectToDatabase(uri) {
+  try {
+    await mongoose.connect(uri, mongooseOptions);
+    console.log(`MongoDB Connected Successfully to ${uri}`);
+    return true;
+  } catch (err) {
+    console.error(`MongoDB Connection Error: Failed to connect to ${uri}`);
     console.error(err.message);
+    if (uri.startsWith('mongodb+srv://')) {
+      console.error('If you are using Atlas, confirm your IP address is added to the cluster IP access list and your connection string includes the target database name.');
+    }
+    return false;
+  }
+}
+
+(async () => {
+  const primaryUri = dbUri || fallbackDbUri;
+  const connected = await connectToDatabase(primaryUri);
+
+  if (!connected && dbUri && dbUri !== fallbackDbUri) {
+    console.warn('Attempting fallback to local MongoDB...');
+    const fallbackConnected = await connectToDatabase(fallbackDbUri);
+
+    if (!fallbackConnected) {
+      console.error('Server will continue running without database. API calls requiring the database will fail.');
+    } else {
+      console.warn('Connected to local MongoDB instead of Atlas.');
+    }
+  } else if (!connected) {
     console.error('Server will continue running without database. API calls requiring the database will fail.');
-  });
+  }
+})();
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/trips', require('./routes/trips'));
 app.use('/api/drivers', require('./routes/drivers'));
+app.use('/api/driver', require('./routes/voiceAssistant'));
 app.use('/api/tracking', require('./routes/tracking'));
 
 // Start Server

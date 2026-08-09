@@ -5,65 +5,119 @@ import {
   LogOut, Edit2, Shield, Phone, Award, TrendingUp, Check, X, Camera, Save, Mail, MapPin
 } from 'lucide-react';
 import BottomNav from './BottomNav';
+import { t, getLanguage, setLanguage } from '../../utils/translations';
 
 const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onProfile }) => {
-  const defaultProfile = {
-    name: 'John Doe',
-    driverId: 'CL-8492',
-    phone: '+91 98765 43210',
-    email: 'john.doe@cargolink.ai',
-    address: '124, Truckers Colony, Salem, TN',
-    language: 'English',
-    photo: 'https://i.pravatar.cc/150?img=11'
+  const getInitialDriverData = () => {
+    try {
+      const savedUserStr = localStorage.getItem('cargolink_user') || localStorage.getItem('cargolink_driver_user');
+      const savedUser = savedUserStr ? JSON.parse(savedUserStr) : null;
+      const currentUser = savedUser?.user || savedUser;
+
+      const savedProfileStr = localStorage.getItem('cargolink_driver_profile');
+      const savedProfile = savedProfileStr ? JSON.parse(savedProfileStr) : {};
+
+      const name = currentUser?.fullName || currentUser?.name || savedUser?.name || savedUser?.fullName || savedProfile.name || savedProfile.fullName || 'Driver';
+      const phone = savedProfile.phone || currentUser?.mobile || currentUser?.phone || savedUser?.phone || '+91 98765 43210';
+      const email = savedProfile.email || currentUser?.email || savedUser?.email || 'driver@cargolink.ai';
+      const address = savedProfile.address || '124, Truckers Colony, Salem, TN';
+      const driverId = savedProfile.driverId || currentUser?.driverId || 'CL-8492';
+      const photo = savedProfile.photo || 'https://i.pravatar.cc/150?img=11';
+
+      const currentLangCode = getLanguage();
+      const language = currentLangCode === 'ta' ? 'தமிழ் (Tamil)' : 'English';
+
+      return { name, driverId, phone, email, address, language, photo };
+    } catch (e) {
+      return {
+        name: 'Driver',
+        driverId: 'CL-8492',
+        phone: '+91 98765 43210',
+        email: 'driver@cargolink.ai',
+        address: '124, Truckers Colony, Salem, TN',
+        language: 'English',
+        photo: 'https://i.pravatar.cc/150?img=11'
+      };
+    }
   };
 
-  const [profile, setProfile] = useState(() => {
-    try {
-      const saved = localStorage.getItem('cargolink_driver_profile');
-      return saved ? { ...defaultProfile, ...JSON.parse(saved) } : defaultProfile;
-    } catch (e) {
-      return defaultProfile;
-    }
-  });
-
+  const [profile, setProfile] = useState(getInitialDriverData);
+  const [currentLang, setCurrentLang] = useState(getLanguage);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({ ...profile });
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-
   const [showLangPicker, setShowLangPicker] = useState(false);
-  const languages = ['English', 'தமிழ் (Tamil)', 'हिन्दी (Hindi)', 'తెలుగు (Telugu)', '<ctrl42>ಕನ್ನಡ (Kannada)'];
+
+  const languages = ['English', 'தமிழ் (Tamil)'];
 
   useEffect(() => {
     setEditForm({ ...profile });
   }, [profile]);
 
+  useEffect(() => {
+    const handleLangChange = (e) => {
+      if (e.detail?.language) {
+        setCurrentLang(e.detail.language);
+      }
+    };
+    window.addEventListener('cargolink_lang_updated', handleLangChange);
+    return () => window.removeEventListener('cargolink_lang_updated', handleLangChange);
+  }, []);
+
   const handleSaveProfile = () => {
     setErrorMsg('');
     if (!editForm.name.trim()) {
-      setErrorMsg('Driver Name cannot be empty.');
+      setErrorMsg(t('nameRequired', currentLang));
       return;
     }
     if (!editForm.phone.trim() || editForm.phone.replace(/\D/g, '').length < 10) {
-      setErrorMsg('Please enter a valid 10-digit mobile number.');
+      setErrorMsg(t('phoneRequired', currentLang));
       return;
     }
     if (!editForm.email.includes('@')) {
-      setErrorMsg('Please enter a valid email address.');
+      setErrorMsg(t('emailRequired', currentLang));
       return;
     }
     if (!editForm.address.trim()) {
-      setErrorMsg('Address cannot be empty.');
+      setErrorMsg(t('addressRequired', currentLang));
       return;
     }
 
     const updated = { ...editForm };
     setProfile(updated);
+
     try {
+      // Save profile object
       localStorage.setItem('cargolink_driver_profile', JSON.stringify(updated));
+
+      // Also update cargolink_user & cargolink_driver_user for global consistency
+      const userStr = localStorage.getItem('cargolink_user');
+      if (userStr) {
+        const uObj = JSON.parse(userStr);
+        uObj.name = updated.name;
+        uObj.fullName = updated.name;
+        if (uObj.user) {
+          uObj.user.fullName = updated.name;
+        }
+        localStorage.setItem('cargolink_user', JSON.stringify(uObj));
+      }
+
+      const dUserStr = localStorage.getItem('cargolink_driver_user');
+      if (dUserStr) {
+        const dObj = JSON.parse(dUserStr);
+        dObj.name = updated.name;
+        dObj.fullName = updated.name;
+        localStorage.setItem('cargolink_driver_user', JSON.stringify(dObj));
+      }
+
+      // Dispatch global event so header and dashboards instantly update name & data
+      window.dispatchEvent(new CustomEvent('cargolink_user_updated', {
+        detail: { name: updated.name, fullName: updated.name, profile: updated }
+      }));
     } catch (e) {}
 
-    setSuccessMsg('Profile updated successfully!');
+    setSuccessMsg(t('profileUpdated', currentLang));
     setIsEditing(false);
     setTimeout(() => setSuccessMsg(''), 3000);
   };
@@ -78,6 +132,21 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
     const avatarIds = [12, 13, 33, 53, 68, 11];
     const randomImg = `https://i.pravatar.cc/150?img=${avatarIds[Math.floor(Math.random() * avatarIds.length)]}`;
     setEditForm({ ...editForm, photo: randomImg });
+  };
+
+  const handleSelectLanguage = (selectedLangStr) => {
+    const langCode = selectedLangStr.includes('Tamil') || selectedLangStr === 'ta' ? 'ta' : 'en';
+    setLanguage(langCode);
+    setCurrentLang(langCode);
+
+    const updated = { ...profile, language: selectedLangStr };
+    setProfile(updated);
+    setEditForm({ ...editForm, language: selectedLangStr });
+
+    try {
+      localStorage.setItem('cargolink_driver_profile', JSON.stringify(updated));
+    } catch (e) {}
+    setShowLangPicker(false);
   };
 
   return (
@@ -95,26 +164,22 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
             borderTopLeftRadius: '28px', borderTopRightRadius: '28px',
             padding: '1.5rem', boxShadow: '0 -8px 30px rgba(0,0,0,0.15)'
           }}>
-            <h3 className="text-poppins font-bold text-brown" style={{ margin: '0 0 1rem 0', fontSize: '1rem' }}>Select Preferred Language</h3>
-            {languages.map((lang, i) => (
-              <div key={i} onClick={() => {
-                const updated = { ...profile, language: lang };
-                setProfile(updated);
-                setEditForm({ ...editForm, language: lang });
-                try { localStorage.setItem('cargolink_driver_profile', JSON.stringify(updated)); } catch (e) {}
-                setShowLangPicker(false);
-              }}
+            <h3 className="text-poppins font-bold text-brown" style={{ margin: '0 0 1rem 0', fontSize: '1rem' }}>
+              {t('selectLanguage', currentLang)}
+            </h3>
+            {languages.map((langStr, i) => (
+              <div key={i} onClick={() => handleSelectLanguage(langStr)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   padding: '0.85rem 0', borderBottom: i < languages.length - 1 ? '1px solid #F0EAE3' : 'none',
                   cursor: 'pointer'
                 }}>
-                <span className="text-poppins font-medium text-brown" style={{ fontSize: '0.9rem' }}>{lang}</span>
-                {profile.language === lang && <Check size={18} color="var(--primary-brown)" />}
+                <span className="text-poppins font-medium text-brown" style={{ fontSize: '0.9rem' }}>{langStr}</span>
+                {profile.language === langStr && <Check size={18} color="var(--primary-brown)" />}
               </div>
             ))}
             <button onClick={() => setShowLangPicker(false)} className="btn-beige" style={{ marginTop: '1rem', color: 'var(--primary-brown)' }}>
-              Cancel
+              {t('cancel', currentLang)}
             </button>
           </div>
         </div>
@@ -133,7 +198,9 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
             padding: '1.25rem', overflowY: 'auto', display: 'flex', flexDirection: 'column'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 className="text-poppins font-bold text-brown" style={{ margin: 0, fontSize: '1.1rem' }}>Edit Driver Profile</h3>
+              <h3 className="text-poppins font-bold text-brown" style={{ margin: 0, fontSize: '1.1rem' }}>
+                {t('editProfile', currentLang)}
+              </h3>
               <button onClick={handleCancelEdit} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
                 <X size={22} color="var(--text-dark-brown)" />
               </button>
@@ -164,27 +231,27 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
               <div>
-                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>Driver Name</label>
+                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>{t('driverProfile', currentLang)}</label>
                 <input className="input-premium" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
               </div>
               <div>
-                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>Phone Number</label>
+                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>{t('mobile', currentLang)}</label>
                 <input className="input-premium" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
               </div>
               <div>
-                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>Email Address</label>
+                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>{t('email', currentLang)}</label>
                 <input className="input-premium" value={editForm.email} onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
               </div>
               <div>
-                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>Address</label>
+                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>{t('address', currentLang)}</label>
                 <input className="input-premium" value={editForm.address} onChange={e => setEditForm({ ...editForm, address: e.target.value })} />
               </div>
               <div>
-                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>Preferred Language</label>
+                <label className="text-poppins font-bold text-brown" style={{ fontSize: '0.75rem' }}>{t('preferredLanguage', currentLang)}</label>
                 <select
                   className="input-premium"
                   value={editForm.language}
-                  onChange={e => setEditForm({ ...editForm, language: e.target.value })}
+                  onChange={e => handleSelectLanguage(e.target.value)}
                   style={{ padding: '0.85rem 1rem' }}
                 >
                   {languages.map((l, i) => (
@@ -197,10 +264,10 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
             {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '1.25rem', paddingBottom: '0.5rem' }}>
               <button type="button" className="btn-beige" onClick={handleCancelEdit} style={{ flex: 1, padding: '0.85rem', color: 'var(--primary-brown)' }}>
-                Cancel
+                {t('cancel', currentLang)}
               </button>
               <button type="button" className="btn-brown" onClick={handleSaveProfile} style={{ flex: 1.5, padding: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                <Save size={16} /> Save Changes
+                <Save size={16} /> {t('saveChanges', currentLang)}
               </button>
             </div>
           </div>
@@ -212,7 +279,9 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
         <button onClick={onBack} style={{ background: 'var(--bg-warm)', border: 'none', padding: '8px', cursor: 'pointer', borderRadius: '12px', display: 'flex' }}>
           <ArrowLeft size={20} color="var(--text-dark-brown)" />
         </button>
-        <h2 className="text-poppins font-bold text-brown" style={{ fontSize: '1.1rem', margin: 0 }}>Driver Profile</h2>
+        <h2 className="text-poppins font-bold text-brown" style={{ fontSize: '1.1rem', margin: 0 }}>
+          {t('driverProfile', currentLang)}
+        </h2>
       </div>
 
       {/* Scroll Area */}
@@ -236,7 +305,7 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
                 color: 'var(--primary-brown)', fontFamily: 'var(--font-poppins)', fontSize: '0.75rem', fontWeight: 600
               }}
             >
-              <Edit2 size={15} /> Edit Profile
+              <Edit2 size={15} /> {t('editProfile', currentLang)}
             </button>
 
             <div style={{ width: '80px', height: '80px', borderRadius: '50%', overflow: 'hidden', margin: '0 auto 8px auto', border: '3px solid var(--secondary-beige)', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
@@ -244,7 +313,7 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
             </div>
 
             <h2 className="text-poppins font-bold text-brown" style={{ fontSize: '1.2rem', margin: '0 0 2px 0' }}>{profile.name}</h2>
-            <p className="text-poppins font-medium text-primary" style={{ fontSize: '0.8rem', margin: '0 0 8px 0' }}>Driver ID: {profile.driverId}</p>
+            <p className="text-poppins font-medium text-primary" style={{ fontSize: '0.8rem', margin: '0 0 8px 0' }}>{t('driverId', currentLang)}: {profile.driverId}</p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', margin: '0 0 10px 0' }}>
               <p className="text-poppins text-brown" style={{ fontSize: '0.78rem', margin: 0, opacity: 0.75 }}>📱 {profile.phone}</p>
@@ -263,9 +332,9 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
           {/* Performance Summary */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '1.25rem' }}>
             {[
-              { label: 'Completed Trips', val: '248', icon: <Award size={18} color="#8B5E3C" /> },
-              { label: 'Total Earnings', val: '₹22,400', icon: <TrendingUp size={18} color="#2E7D32" /> },
-              { label: 'Safety Rating', val: '98%', icon: <Shield size={18} color="#1565C0" /> },
+              { label: t('completedTrips', currentLang), val: '248', icon: <Award size={18} color="#8B5E3C" /> },
+              { label: t('totalEarnings', currentLang), val: '₹22,400', icon: <TrendingUp size={18} color="#2E7D32" /> },
+              { label: t('safetyRating', currentLang), val: '98%', icon: <Shield size={18} color="#1565C0" /> },
             ].map((st, i) => (
               <div key={i} className="premium-card" style={{ padding: '0.75rem', textAlign: 'center', marginBottom: 0 }}>
                 {st.icon}
@@ -276,10 +345,14 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
           </div>
 
           {/* Preferences & Settings */}
-          <h4 className="text-poppins font-bold text-brown" style={{ margin: '0 0 0.75rem 0', fontSize: '0.92rem' }}>App Settings & Preferences</h4>
+          <h4 className="text-poppins font-bold text-brown" style={{ margin: '0 0 0.75rem 0', fontSize: '0.92rem' }}>
+            {t('appSettings', currentLang)}
+          </h4>
           <div className="premium-card" style={{ padding: '0.5rem 1rem', marginBottom: '1.25rem' }}>
             <div onClick={() => setShowLangPicker(true)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 0', cursor: 'pointer' }}>
-              <span className="text-poppins font-medium text-brown" style={{ fontSize: '0.88rem' }}>Preferred Language</span>
+              <span className="text-poppins font-medium text-brown" style={{ fontSize: '0.88rem' }}>
+                {t('preferredLanguage', currentLang)}
+              </span>
               <span className="text-poppins font-bold text-primary" style={{ fontSize: '0.82rem' }}>{profile.language} ›</span>
             </div>
           </div>
@@ -291,7 +364,7 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
             fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
             boxShadow: '0 2px 10px rgba(198,40,40,0.06)'
           }}>
-            <LogOut size={18} /> Logout from Account
+            <LogOut size={18} /> {t('logout', currentLang)}
           </button>
 
         </div>
@@ -310,3 +383,4 @@ const ProfileScreen = ({ onBack, onLogout, onHome, onTrips, onNotifications, onP
 };
 
 export default ProfileScreen;
+

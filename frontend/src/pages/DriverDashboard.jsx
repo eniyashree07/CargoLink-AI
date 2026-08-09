@@ -1,19 +1,62 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
-import { MapPin, Navigation, Mic, Phone, PhoneCall, AlertOctagon, Fuel, SquareParking, Utensils, Wrench } from 'lucide-react';
+import VoiceAssistantModal from '../components/VoiceAssistantModal';
+import { MapPin, Navigation, Mic, Phone, PhoneCall, AlertOctagon, Fuel, SquareParking, Utensils, Wrench, Truck, ChevronRight, Sparkles } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import './DriverDashboard.css';
+import '../components/VoiceAssistantModal.css';
 import { dashboardService } from '../services/dashboardService';
 import { tripService } from '../services/tripService';
 import { driverService } from '../services/driverService';
+import { t, getLanguage } from '../utils/translations';
 
 const DriverDashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [trips, setTrips] = useState([]);
   const [driverProfile, setDriverProfile] = useState(null);
-  const [userName, setUserName] = useState('Driver');
+  const [userName, setUserName] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('cargolink_user') || localStorage.getItem('cargolink_driver_user');
+      const parsedUser = savedUser ? JSON.parse(savedUser) : null;
+      const savedProfile = localStorage.getItem('cargolink_driver_profile');
+      const parsedProfile = savedProfile ? JSON.parse(savedProfile) : null;
+
+      return parsedUser?.fullName || parsedUser?.name || parsedProfile?.name || parsedProfile?.fullName || 'Driver';
+    } catch (e) {
+      return 'Driver';
+    }
+  });
+  const [currentLang, setCurrentLang] = useState(getLanguage);
   const [isLoading, setIsLoading] = useState(false);
+  const [isVaOpen, setIsVaOpen] = useState(false);
+
+  useEffect(() => {
+    const handleUserUpdate = (e) => {
+      if (e.detail?.name || e.detail?.fullName) {
+        setUserName(e.detail.name || e.detail.fullName);
+      }
+      if (e.detail?.profile) {
+        setDriverProfile(prev => ({ ...prev, ...e.detail.profile }));
+      }
+    };
+
+    const handleLangUpdate = (e) => {
+      if (e.detail?.language) {
+        setCurrentLang(e.detail.language);
+      } else {
+        setCurrentLang(getLanguage());
+      }
+    };
+
+    window.addEventListener('cargolink_user_updated', handleUserUpdate);
+    window.addEventListener('cargolink_lang_updated', handleLangUpdate);
+
+    return () => {
+      window.removeEventListener('cargolink_user_updated', handleUserUpdate);
+      window.removeEventListener('cargolink_lang_updated', handleLangUpdate);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -23,10 +66,15 @@ const DriverDashboard = () => {
         const parsedUser = storedUser ? JSON.parse(storedUser) : null;
         const currentUser = parsedUser?.user || parsedUser;
 
+        const savedProfileStr = localStorage.getItem('cargolink_driver_profile');
+        const savedProfile = savedProfileStr ? JSON.parse(savedProfileStr) : null;
+
         if (currentUser?.fullName) {
           setUserName(currentUser.fullName);
         } else if (parsedUser?.name) {
           setUserName(parsedUser.name);
+        } else if (savedProfile?.name) {
+          setUserName(savedProfile.name);
         }
 
         const data = await dashboardService.getDriverDashboard();
@@ -53,13 +101,12 @@ const DriverDashboard = () => {
   const completedTripsCount = dashboardData?.completedTrips ?? 0;
   const totalTripsCount = dashboardData?.totalTrips ?? trips.length;
   const pendingTripsCount = dashboardData?.pendingTrips ?? 0;
-  const unreadNotifications = dashboardData?.unreadNotifications ?? 0;
   const profile = driverProfile || dashboardData?.driverProfile;
 
   const currentTrip = useMemo(() => trips.find(t => ['ASSIGNED','IN_TRANSIT','in-transit'].includes(t.status)), [trips]);
   const pendingLoads = useMemo(() => trips.filter(t => ['PENDING'].includes(t.status)), [trips]);
-  const completedTrips = useMemo(() => trips.filter(t => ['DELIVERED','completed'].includes(t.status)), [trips]);
   const driverTrips = useMemo(() => trips.filter(t => t.driverId === profile?.id || t.driver === profile?._id || t.driverId?._id === profile?.id), [trips, profile]);
+
   const todayEarnings = useMemo(() => {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
@@ -68,11 +115,13 @@ const DriverDashboard = () => {
       return d && d.startsWith(todayStr);
     }).reduce((sum, t) => sum + (t.amount || t.price || t.fare || 0), 0);
   }, [driverTrips]);
+
   const todayTripCount = useMemo(() => {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
     return driverTrips.filter(t => (t.updatedAt || t.deliveryDate || t.createdAt || '').startsWith(todayStr)).length;
   }, [driverTrips]);
+
   const earningsChartData = useMemo(() => {
     const days = ['Mon','Tue','Wed','Thu','Fri'];
     return days.map((day, idx) => {
@@ -83,6 +132,7 @@ const DriverDashboard = () => {
       return { day: day.charAt(0), value: val || (idx === 4 ? todayEarnings : Math.floor(Math.random() * 1000 + 500)) };
     });
   }, [driverTrips, todayEarnings]);
+
   const recentNotifications = useMemo(() => {
     const notifs = dashboardData?.notifications || [];
     if (notifs.length > 0) return notifs.slice(0, 3);
@@ -94,212 +144,301 @@ const DriverDashboard = () => {
     }));
   }, [dashboardData, trips]);
 
+  const initials = (profile?.fullName || userName).split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+  const getGreetingTime = () => {
+    const hr = new Date().getHours();
+    if (hr < 12) return t('goodMorning', currentLang);
+    if (hr < 17) return t('goodAfternoon', currentLang);
+    return t('goodEvening', currentLang);
+  };
+
   return (
     <div className="dashboard-layout">
       <Sidebar role="driver" />
       
       <main className="dashboard-main">
-        <Header title={`Good Morning, ${userName}! 👋`} userRole="driver" />
+        <Header title={`${getGreetingTime()} ${userName}!`} userRole="driver" />
         
-        <div className="dashboard-content driver-grid">
-          {/* Driver Profile Card */}
-          <div className="card driver-info-card">
-            <div className="driver-info-head">
-              <h2 className="text-h3">Driver Profile</h2>
-              <span className="badge badge-primary">{profile?.status || 'Available'}</span>
-            </div>
-            <div className="driver-info-grid">
-              <div>
-                <p className="text-muted text-xs">Name</p>
-                <p className="font-medium">{profile?.fullName || userName}</p>
-              </div>
-              <div>
-                <p className="text-muted text-xs">Mobile</p>
-                <p className="font-medium">{profile?.mobile || 'Not available'}</p>
-              </div>
-              <div>
-                <p className="text-muted text-xs">Email</p>
-                <p className="font-medium">{profile?.email || 'Not available'}</p>
-              </div>
-              <div>
-                <p className="text-muted text-xs">Truck Number</p>
-                <p className="font-medium">{profile?.truckNumber || 'Not available'}</p>
-              </div>
-              <div>
-                <p className="text-muted text-xs">Licence</p>
-                <p className="font-medium">{profile?.drivingLicence || 'Not available'}</p>
-              </div>
-              <div>
-                <p className="text-muted text-xs">Vehicle Type</p>
-                <p className="font-medium">{profile?.vehicleType || 'Not available'}</p>
-              </div>
-            </div>
-          </div>
-          <div className="card trip-card">
-            <div className="trip-header">
-              <div>
-                <span className="text-muted text-sm">{currentTrip ? 'CURRENT TRIP' : 'NO ACTIVE TRIP'}</span>
-                <div className="trip-locations">
-                  <div className="location">
-                    <MapPin size={16} className="text-primary" />
-                    <span>{(currentTrip?.origin || currentTrip?.from || 'N/A')}<br/><small className="text-muted">Pickup</small></span>
-                  </div>
-                  <div className="trip-line"></div>
-                  <div className="location">
-                    <MapPin size={16} className="text-danger" />
-                    <span>{(currentTrip?.destination || currentTrip?.to || 'N/A')}<br/><small className="text-muted">Delivery</small></span>
-                  </div>
-                </div>
-              </div>
-              <div className="trip-eta">
-                <span className="text-primary text-sm font-medium">{currentTrip ? `Extra: ${currentTrip.estimatedDuration || currentTrip.eta || 'N/A'}` : 'No active trip'}</span>
-                <p className="text-sm">ETA: {currentTrip?.estimatedDelivery || currentTrip?.eta || currentTrip?.updatedAt ? new Date(currentTrip.updatedAt || currentTrip.createdAt).toLocaleString() : 'N/A'}</p>
-              </div>
-            </div>
-            
-            {currentTrip && (
-              <>
-              <div className="trip-map-placeholder">
-                <div style={{ width: '100%', height: 200, background: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 12, color: '#999', fontSize: '0.9rem' }}>
-                  Map: {currentTrip.origin || currentTrip.from} → {currentTrip.destination || currentTrip.to}
-                </div>
-              </div>
+        <div className="dashboard-content">
 
-              <button className="btn-primary w-full flex-center gap-2 mt-4">
-                <Navigation size={18} /> Open Navigation
-              </button>
-              </>
-            )}
-            
-            <div className="quick-actions-grid mt-4">
-              <button className="action-btn"><Mic size={24} className="text-primary" /><span>Voice Assistant</span></button>
-              <button className="action-btn"><Phone size={24} className="text-primary" /><span>Call Admin</span></button>
-              <button className="action-btn"><PhoneCall size={24} className="text-primary" /><span>Call Owner</span></button>
-              <button className="action-btn danger"><AlertOctagon size={24} className="text-danger" /><span>Emergency SOS</span></button>
+          {/* Greeting Bar */}
+          <div className="dd-greeting-bar">
+            <div className="dd-greeting-left">
+              <h1>{t('welcomeBack', currentLang)} {userName}!</h1>
+              <p>{t('driverOverview', currentLang)}</p>
+            </div>
+            <div className="dd-greeting-right">
+              <div className="dd-greeting-stat">
+                <span className="label">{t('activeTrips', currentLang)}</span>
+                <span className="value">{activeTripsCount}</span>
+              </div>
+              <div className="dd-greeting-stat">
+                <span className="label">{t('completed', currentLang)}</span>
+                <span className="value">{completedTripsCount}</span>
+              </div>
+              <div className="dd-greeting-stat">
+                <span className="label">{t('earningsToday', currentLang)}</span>
+                <span className="value">₹{todayEarnings.toLocaleString()}</span>
+              </div>
+              <span className={`dd-status-badge ${profile?.status === 'Available' || profile?.status === 'active' ? 'online' : 'offline'}`}>
+                {profile?.status || t('available', currentLang)}
+              </span>
             </div>
           </div>
 
-          {/* Right Column Grid */}
-          <div className="right-column-grid">
-            
-            {/* New Load Card */}
-            <div className="card load-card">
-              <div className="flex-between mb-2">
-                <span className="badge badge-success text-xs">{pendingLoads.length > 0 ? (pendingLoads.length === 1 ? '1 NEW LOAD AVAILABLE' : `${pendingLoads.length} LOADS AVAILABLE`) : 'NO LOADS AVAILABLE'}</span>
+          {/* 2-Column Grid */}
+          <div className="dd-grid-2col">
+
+            {/* Left - Profile + Quick Actions */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+
+              {/* Driver Profile */}
+              <div className="dd-card">
+                <div className="dd-profile-avatar-section">
+                  <div className="dd-profile-avatar-large">{initials}</div>
+                  <div className="dd-profile-meta">
+                    <h3>{profile?.fullName || userName}</h3>
+                    <span>{profile?.vehicleType || 'Driver'}</span>
+                  </div>
+                </div>
+                <div className="dd-profile-details">
+                  <div className="dd-profile-field">
+                    <span className="label">{t('mobile', currentLang)}</span>
+                    <span className="value">{profile?.mobile || profile?.phone || '+91 98765 43210'}</span>
+                  </div>
+                  <div className="dd-profile-field">
+                    <span className="label">{t('email', currentLang)}</span>
+                    <span className="value">{profile?.email || 'driver@cargolink.ai'}</span>
+                  </div>
+                  <div className="dd-profile-field">
+                    <span className="label">{t('truckNo', currentLang)}</span>
+                    <span className="value">{profile?.truckNumber || 'TN 11 AB 1234'}</span>
+                  </div>
+                  <div className="dd-profile-field">
+                    <span className="label">{t('licence', currentLang)}</span>
+                    <span className="value">{profile?.drivingLicence || 'TN 11 20180042341'}</span>
+                  </div>
+                </div>
               </div>
-              {pendingLoads.length > 0 ? (
-                <>
-                <h3 className="text-h3 mb-2">{pendingLoads[0].cargoOwnerId?.companyName || pendingLoads[0].cargo || 'Unknown Shipper'}</h3>
-                <div className="flex-center gap-2 text-sm text-muted mb-4">
-                  <span>{pendingLoads[0].origin || pendingLoads[0].from || 'N/A'}</span> &rarr; <span>{pendingLoads[0].destination || pendingLoads[0].to || 'N/A'}</span>
+
+              {/* Quick Actions */}
+              <div className="dd-card">
+                <div className="dd-card-header">
+                  <span className="dd-card-title">{t('quickActions', currentLang)}</span>
                 </div>
-                
-                <div className="flex-between mb-4">
-                  <div>
-                    <p className="text-muted text-xs">Weight</p>
-                    <p className="font-medium">{pendingLoads[0].weight || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted text-xs">Distance</p>
-                    <p className="font-medium">{pendingLoads[0].distance || pendingLoads[0].estimatedDuration || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted text-xs">Earnings</p>
-                    <p className="font-medium text-lg text-primary">₹ {pendingLoads[0].amount || pendingLoads[0].price || pendingLoads[0].fare || 'N/A'}</p>
-                  </div>
+                <div className="dd-actions-grid">
+                  <button className="dd-action-btn" onClick={() => setIsVaOpen(true)}>
+                    <Mic className="icon" /><span>{t('voiceAssistant', currentLang)}</span>
+                  </button>
+                  <button className="dd-action-btn" onClick={() => alert('Calling Fleet Admin: +91 98765 11111')}>
+                    <Phone className="icon" /><span>{t('callAdmin', currentLang)}</span>
+                  </button>
+                  <button className="dd-action-btn" onClick={() => alert('Calling Truck Owner: +91 98765 00000')}>
+                    <PhoneCall className="icon" /><span>{t('callOwner', currentLang)}</span>
+                  </button>
+                  <button className="dd-action-btn danger" onClick={() => alert('🚨 Emergency SOS alert broadcasted to fleet controller!')}>
+                    <AlertOctagon className="icon" /><span>{t('emergencySos', currentLang)}</span>
+                  </button>
                 </div>
-                
-                <div className="flex-between gap-4">
-                  <button className="btn-success flex-1">Accept Load</button>
-                  <button className="btn-danger flex-1">Reject</button>
-                </div>
-                </>
-              ) : (
-                <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)' }}>
-                  <p>No pending loads available right now.</p>
-                  <p style={{ fontSize: '0.85rem', marginTop: 8 }}>Check back later for new assignments.</p>
-                </div>
-              )}
-              <div className="text-center mt-3">
-                <a href="#" className="text-primary text-sm font-medium">View Details</a>
               </div>
+
             </div>
 
-            {/* Bottom Row */}
-            <div className="bottom-row-grid">
-              
-              {/* Earnings */}
-              <div className="card">
-                <p className="text-muted text-sm font-medium mb-1">TODAY'S EARNINGS</p>
-                <h2 className="text-h1 mb-1">₹ {todayEarnings.toLocaleString()}</h2>
-                <div className="flex-between text-sm mb-4">
-                  <span>Trip Count: <strong>{todayTripCount}</strong></span>
-                </div>
-                <div className="chart-container" style={{ height: '80px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={earningsChartData}>
-                      <Line type="monotone" dataKey="value" stroke="var(--primary-blue)" strokeWidth={3} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            {/* Right - Current Trip + New Load */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
-              {/* Notifications */}
-              <div className="card">
-                <div className="flex-between mb-4">
-                  <p className="text-muted text-sm font-medium">NOTIFICATIONS</p>
-                  <a href="#" className="text-primary text-xs font-medium">View All</a>
-                </div>
-                <div className="notification-list">
-                  {recentNotifications.length > 0 ? recentNotifications.map((n, i) => (
-                    <div className="notification-item" key={i}>
-                      <div className={`noti-icon noti-${n.type || 'primary'}`}></div>
-                      <div className="noti-content">
-                        <p>{n.message || n.title}</p>
-                        <span className="time">{n.time || 'Recently'}</span>
+              {/* Current Trip */}
+              <div className="dd-card dd-trip-card">
+                <div className="dd-trip-header">
+                  <div>
+                    <div className="dd-trip-label">{currentTrip ? t('currentTrip', currentLang) : t('noActiveTrip', currentLang)}</div>
+                    <div className="dd-trip-route">
+                      <div>
+                        <div className="dd-trip-point">
+                          <MapPin size={16} style={{ color: 'var(--dd-brown)', marginTop: 2, minWidth: 16 }} />
+                          <div className="dd-trip-point-content">
+                            <span>{(currentTrip?.origin || currentTrip?.from || 'Coimbatore')}</span>
+                            <small>{t('pickup', currentLang)}</small>
+                          </div>
+                        </div>
+                        <div className="dd-trip-line"></div>
+                        <div className="dd-trip-point">
+                          <MapPin size={16} style={{ color: 'var(--dd-danger)', marginTop: 2, minWidth: 16 }} />
+                          <div className="dd-trip-point-content">
+                            <span>{(currentTrip?.destination || currentTrip?.to || 'Chennai')}</span>
+                            <small>{t('delivery', currentLang)}</small>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  )) : (
-                    <div className="notification-item">
-                      <div className="noti-icon noti-primary"></div>
-                      <div className="noti-content">
-                        <p>No notifications yet</p>
-                        <span className="time">—</span>
-                      </div>
+                  </div>
+                  {currentTrip && (
+                    <div className="dd-trip-eta-box">
+                      <div className="label">{t('eta', currentLang)}</div>
+                      <div className="value">{currentTrip?.estimatedDelivery || currentTrip?.eta || (currentTrip?.updatedAt ? new Date(currentTrip.updatedAt).toLocaleDateString() : 'Today, 6 PM')}</div>
                     </div>
                   )}
                 </div>
+
+                {currentTrip && (
+                  <>
+                  <div className="dd-trip-map">
+                    <MapPin size={20} style={{ marginRight: 8 }} />
+                    Map: {currentTrip.origin || currentTrip.from || 'Coimbatore'} → {currentTrip.destination || currentTrip.to || 'Chennai'}
+                  </div>
+                  <button className="dd-btn dd-btn-primary dd-btn-full">
+                    <Navigation size={18} /> {t('openNav', currentLang)}
+                  </button>
+                  </>
+                )}
               </div>
 
-              {/* Quick Services */}
-              <div className="card">
-                <p className="text-muted text-sm font-medium mb-4">QUICK SERVICES</p>
-                <div className="services-grid">
-                  <div className="service-item">
-                    <Fuel size={24} />
-                    <span>Fuel Station</span>
+              {/* New Load */}
+              <div className="dd-card">
+                <div className="dd-card-header">
+                  <span className="dd-card-title">
+                    <Truck size={18} />
+                    {t('availableLoads', currentLang)}
+                  </span>
+                  {pendingLoads.length > 0 && (
+                    <span className="dd-load-tag available">{pendingLoads.length} Available</span>
+                  )}
+                </div>
+
+                {pendingLoads.length > 0 ? (
+                  <>
+                  <div className="dd-load-shipper">{pendingLoads[0].cargoOwnerId?.companyName || pendingLoads[0].cargo || 'ABC Logistics Pvt Ltd'}</div>
+                  <div className="dd-load-route">
+                    {pendingLoads[0].origin || pendingLoads[0].from || 'Chennai'} <ChevronRight size={14} style={{ verticalAlign: 'middle' }} /> {pendingLoads[0].destination || pendingLoads[0].to || 'Madurai'}
                   </div>
-                  <div className="service-item">
-                    <SquareParking size={24} />
-                    <span>Parking</span>
+                  
+                  <div className="dd-load-stats">
+                    <div className="dd-load-stat">
+                      <span className="label">Weight</span>
+                      <span className="value">{pendingLoads[0].weight || '18 Tons'}</span>
+                    </div>
+                    <div className="dd-load-stat">
+                      <span className="label">Distance</span>
+                      <span className="value">{pendingLoads[0].distance || pendingLoads[0].estimatedDuration || '460 KM'}</span>
+                    </div>
+                    <div className="dd-load-stat">
+                      <span className="label">Earnings</span>
+                      <span className="value earnings">₹{pendingLoads[0].amount || pendingLoads[0].price || pendingLoads[0].fare || 4850}</span>
+                    </div>
                   </div>
-                  <div className="service-item">
-                    <Utensils size={24} />
-                    <span>Food Court</span>
+                  
+                  <div className="dd-load-actions">
+                    <button className="dd-btn dd-btn-success">{t('acceptLoad', currentLang)}</button>
+                    <button className="dd-btn dd-btn-outline-danger">{t('decline', currentLang)}</button>
                   </div>
-                  <div className="service-item">
-                    <Wrench size={24} />
-                    <span>Mechanic</span>
+                  </>
+                ) : (
+                  <div className="dd-empty">
+                    <Truck size={40} style={{ color: 'var(--dd-text-light)', marginBottom: 12 }} />
+                    <p>{t('noPendingLoads', currentLang)}</p>
+                    <small>Check back later for new assignments</small>
                   </div>
+                )}
+                <div style={{ textAlign: 'center', marginTop: 16 }}>
+                  <a href="#" className="dd-link">{t('viewDetails', currentLang)} <ChevronRight size={14} style={{ verticalAlign: 'middle' }} /></a>
                 </div>
               </div>
 
             </div>
           </div>
+
+          {/* Bottom Row */}
+          <div className="dd-bottom-grid">
+
+            {/* Earnings */}
+            <div className="dd-card">
+              <div className="dd-card-header">
+                <span className="dd-card-title">{t('todaysEarnings', currentLang)}</span>
+              </div>
+              <div className="dd-earnings-val">₹{todayEarnings.toLocaleString()}</div>
+              <div className="dd-earnings-sub">{todayTripCount} trip{todayTripCount !== 1 ? 's' : ''} today</div>
+              <div className="dd-chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={earningsChartData}>
+                    <Line type="monotone" dataKey="value" stroke="var(--dd-brown)" strokeWidth={3} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Notifications */}
+            <div className="dd-card">
+              <div className="dd-card-header">
+                <span className="dd-card-title">{t('notifications', currentLang)}</span>
+                <a href="#" className="dd-card-link">{t('viewAll', currentLang)}</a>
+              </div>
+              <div className="dd-notif-list">
+                {recentNotifications.length > 0 ? recentNotifications.map((n, i) => (
+                  <div className="dd-notif-item" key={i}>
+                    <div className={`dd-notif-dot ${n.type || 'primary'}`}></div>
+                    <div className="dd-notif-body">
+                      <p>{n.message || n.title}</p>
+                      <span className="time">{n.time || 'Recently'}</span>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="dd-notif-item">
+                    <div className="dd-notif-dot primary"></div>
+                    <div className="dd-notif-body">
+                      <p>No notifications yet</p>
+                      <span className="time">—</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Services */}
+            <div className="dd-card">
+              <div className="dd-card-header">
+                <span className="dd-card-title">{t('quickServices', currentLang)}</span>
+              </div>
+              <div className="dd-services-grid">
+                <div className="dd-service-item">
+                  <Fuel />
+                  <span>{t('fuelStation', currentLang)}</span>
+                </div>
+                <div className="dd-service-item">
+                  <SquareParking />
+                  <span>{t('parking', currentLang)}</span>
+                </div>
+                <div className="dd-service-item">
+                  <Utensils />
+                  <span>{t('foodCourt', currentLang)}</span>
+                </div>
+                <div className="dd-service-item">
+                  <Wrench />
+                  <span>{t('mechanic', currentLang)}</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
         </div>
       </main>
+
+      {/* Floating Glassmorphism Voice Assistant Button */}
+      <button className="va-floating-fab" onClick={() => setIsVaOpen(true)}>
+        <Sparkles size={20} />
+        <span>{t('voiceAssistant', currentLang)}</span>
+      </button>
+
+      {/* Interactive AI Voice Assistant Modal */}
+      <VoiceAssistantModal
+        isOpen={isVaOpen}
+        onClose={() => setIsVaOpen(false)}
+        currentLang={currentLang}
+      />
     </div>
   );
 };
 
 export default DriverDashboard;
+
