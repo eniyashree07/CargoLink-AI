@@ -24,9 +24,31 @@ export const authService = {
     return response;
   },
 
+  async demoLogin(role) {
+    const response = await apiClient.post('/api/auth/demo', { role });
+
+    if (response && response.token) {
+      apiClient.setToken(response.token);
+    }
+
+    return response;
+  },
+
   async getCurrentUser() {
     const response = await apiClient.get('/api/auth/me');
     return response;
+  },
+
+  async forgotPassword(mobile) {
+    return await apiClient.post('/api/auth/forgot-password', { mobile });
+  },
+
+  async verifyOtp(mobile, otp) {
+    return await apiClient.post('/api/auth/verify-otp', { mobile, otp });
+  },
+
+  async resetPassword(resetToken, newPassword) {
+    return await apiClient.post('/api/auth/reset-password', { resetToken, newPassword });
   },
 
   logout() {

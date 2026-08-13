@@ -37,6 +37,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Prevent horizontal overflow across the entire application.
+   Uses clip (not hidden) so sticky/sidebar layouts keep working. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+#root {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 * {
   box-sizing: border-box;
 }

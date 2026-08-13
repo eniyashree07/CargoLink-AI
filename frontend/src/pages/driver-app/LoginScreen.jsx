@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 
-const LoginScreen = ({ onNext }) => {
+const LoginScreen = ({ onNext, onForgotPassword }) => {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [role, setRole] = useState('driver'); // 'driver' | 'owner' | 'admin'
 
@@ -401,7 +401,11 @@ const LoginScreen = ({ onNext }) => {
                   Remember Me
                 </label>
                 <span
-                  onClick={() => alert('Password reset instructions have been sent to your email/mobile!')}
+                  onClick={() => {
+                    if (typeof onForgotPassword === 'function') {
+                      onForgotPassword();
+                    }
+                  }}
                   style={{ fontSize: '0.78rem', color: 'var(--primary-brown)', fontWeight: 600, cursor: 'pointer' }}
                 >
                   Forgot Password?

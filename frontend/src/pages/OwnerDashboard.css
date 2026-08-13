@@ -516,3 +516,153 @@
 .od-page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
 .od-page-header-left h2 { font-size: 1.2rem; font-weight: 700; color: var(--ow-text-dark); margin: 0; }
 .od-page-header-left p { font-size: 0.85rem; color: var(--ow-text-muted); margin: 4px 0 0; }
+
+/* ═══════════════════════════════════════════════════════════════
+   THEME: DARK MODE — glowing glassmorphism background
+   ═══════════════════════════════════════════════════════════════ */
+.dark-theme {
+  --ow-bg:           #0B0B16;
+  --ow-bg-alt:       #10101D;
+  --ow-white:        #141424;
+  --ow-brown:        #D9A96B;
+  --ow-brown-dark:   #E9C68F;
+  --ow-brown-light:  rgba(217,169,107,0.10);
+  --ow-beige:        #8A6B50;
+  --ow-beige-light:  #26203A;
+  --ow-text-dark:    #F2EEFF;
+  --ow-text-body:    #C8C3DC;
+  --ow-text-muted:   #9C96B6;
+  --ow-text-light:   #6E6790;
+  --ow-border:       rgba(139,92,246,0.16);
+  --ow-border-hover: rgba(139,92,246,0.45);
+  --ow-shadow-xs:    0 1px 4px rgba(0,0,0,0.40);
+  --ow-shadow-sm:    0 4px 16px rgba(0,0,0,0.45);
+  --ow-shadow-md:    0 8px 28px rgba(0,0,0,0.50);
+  --ow-shadow-lg:    0 16px 48px rgba(0,0,0,0.60);
+  color-scheme: dark;
+}
+.dark-theme body { background: var(--ow-bg); }
+
+/* Animated glowing aurora background */
+.dark-theme .od-root { background: var(--ow-bg); }
+.dark-theme .od-root::before,
+.dark-theme .od-root::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.dark-theme .od-root::before {
+  background:
+    radial-gradient(720px 520px at 18% 8%, rgba(139,92,246,0.20), transparent 60%),
+    radial-gradient(720px 520px at 82% 18%, rgba(59,130,246,0.14), transparent 60%),
+    radial-gradient(900px 620px at 75% 92%, rgba(217,169,107,0.14), transparent 60%);
+  animation: od-aurora-drift 16s ease-in-out infinite alternate;
+}
+.dark-theme .od-root::after {
+  background:
+    radial-gradient(520px 420px at 6% 88%, rgba(16,185,129,0.12), transparent 60%),
+    radial-gradient(620px 420px at 92% 58%, rgba(139,92,246,0.12), transparent 60%);
+  animation: od-aurora-drift 22s ease-in-out infinite alternate-reverse;
+}
+@keyframes od-aurora-drift {
+  0%   { opacity: 0.55; transform: translate(0, 0) scale(1); }
+  50%  { opacity: 1;    transform: translate(-1.5%, 1.5%) scale(1.06); }
+  100% { opacity: 0.70; transform: translate(1.5%, -1.5%) scale(1.1); }
+}
+
+/* Glassmorphic surfaces that let the glow bleed through */
+.dark-theme .od-sidebar,
+.dark-theme .od-topbar,
+.dark-theme .od-card,
+.dark-theme .od-stat-card,
+.dark-theme .od-welcome-banner,
+.dark-theme .od-ai-card {
+  background: rgba(19,19,35,0.62);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.dark-theme .od-sidebar,
+.dark-theme .od-topbar {
+  background: rgba(15,15,28,0.72);
+  border-color: var(--ow-border);
+}
+.dark-theme .od-main,
+.dark-theme .od-sidebar { position: relative; z-index: 1; }
+
+/* Dark cards get a soft violet glow ring */
+.dark-theme .od-card,
+.dark-theme .od-stat-card,
+.dark-theme .od-welcome-banner,
+.dark-theme .od-ai-card {
+  border: 1px solid rgba(139,92,246,0.22);
+  box-shadow: 0 0 18px rgba(139,92,246,0.10), inset 0 0 30px rgba(139,92,246,0.03);
+}
+.dark-theme .od-stat-card:hover,
+.dark-theme .od-card:hover {
+  border-color: rgba(139,92,246,0.50);
+  box-shadow: 0 0 26px rgba(139,92,246,0.22), inset 0 0 40px rgba(139,92,246,0.05);
+}
+
+/* Dark mode: banners & driver status chips */
+.dark-theme .od-cl-success-banner { background: rgba(16,185,129,0.12); color: var(--ow-success); border-color: rgba(16,185,129,0.30); }
+.dark-theme .od-cl-driver-status { background: rgba(16,185,129,0.15); }
+.dark-theme .od-card[style*="e5e3df"] { background: #1A1A2E !important; }
+
+/* Active nav glow in dark mode */
+.dark-theme .od-nav-item.active {
+  box-shadow: 0 0 18px rgba(217,169,107,0.35), 0 4px 14px rgba(0,0,0,0.30);
+}
+
+/* Settings helpers used by the JSX */
+.dark-theme .settings-icon-glow {
+  animation: od-icon-pulse 2.2s ease-in-out infinite;
+}
+@keyframes od-icon-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(139,92,246,0.50)); }
+  50%      { filter: drop-shadow(0 0 14px rgba(139,92,246,0.95)); }
+}
+.settings-theme-card.active {
+  box-shadow: 0 0 22px rgba(139,92,246,0.25);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   THEME: LIGHT MODE — glowing borders on cards
+   ═══════════════════════════════════════════════════════════════ */
+html:not(.dark-theme) .od-root .od-stat-card,
+html:not(.dark-theme) .od-root .od-card,
+html:not(.dark-theme) .od-root .od-welcome-banner,
+html:not(.dark-theme) .od-root .od-ai-card {
+  border: 1.5px solid rgba(139,94,60,0.30);
+  box-shadow:
+    0 0 0 1px rgba(139,94,60,0.05),
+    0 0 14px rgba(139,94,60,0.12),
+    var(--ow-shadow-xs);
+}
+html:not(.dark-theme) .od-root .od-stat-card { animation: od-light-border-glow 4s ease-in-out infinite; }
+html:not(.dark-theme) .od-root .od-card:hover,
+html:not(.dark-theme) .od-root .od-stat-card:hover,
+html:not(.dark-theme) .od-root .od-welcome-banner:hover {
+  border-color: rgba(139,94,60,0.55);
+  box-shadow:
+    0 0 0 1px rgba(139,94,60,0.08),
+    0 0 24px rgba(139,94,60,0.25),
+    0 0 48px rgba(139,92,246,0.08),
+    var(--ow-shadow-md);
+}
+@keyframes od-light-border-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(139,94,60,0.05), 0 0 10px rgba(139,94,60,0.10), var(--ow-shadow-xs); }
+  50%      { box-shadow: 0 0 0 1px rgba(139,94,60,0.08), 0 0 24px rgba(139,94,60,0.22), 0 0 44px rgba(139,92,246,0.06); }
+}
+
+/* Smooth theme transition on the main shells */
+.dark-theme .od-sidebar,
+.dark-theme .od-topbar,
+.dark-theme .od-card,
+.dark-theme .od-stat-card,
+.dark-theme .od-welcome-banner {
+  transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              background 0.4s ease, background-color 0.4s ease,
+              border-color 0.4s ease, box-shadow 0.4s ease;
+}

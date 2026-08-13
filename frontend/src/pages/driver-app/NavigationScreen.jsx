@@ -1,54 +1,183 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Navigation2, AlertTriangle, PauseCircle, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Navigation2, PauseCircle, CheckCircle2, Satellite, SatelliteDish, WifiOff } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import apiClient from '../../services/api';
+
+const DEFAULT_POSITION = [11.0168, 76.9558];
+
+const truckMarkerIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:34px;height:34px;background:#8B5E3C;border:3px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 3px 10px rgba(0,0,0,.35)">🚛</div>`,
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
+});
+
+const MapFollowPosition = ({ position }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (position && Array.isArray(position)) {
+      map.flyTo(position, Math.max(map.getZoom(), 15), { duration: 0.6 });
+    }
+  }, [position && position[0], position && position[1]]);
+  return null;
+};
 
 const NavigationScreen = ({ onBack, onComplete }) => {
   const [tripPaused, setTripPaused] = useState(false);
   const [eta, setEta] = useState('2h 28m');
   const [distance, setDistance] = useState('118.4 KM');
   const [speed, setSpeed] = useState(62);
+  const [gpsStatus, setGpsStatus] = useState('connecting'); // 'connecting' | 'live' | 'off'
+  const [gpsFix, setGpsFix] = useState(null);
 
-  // Live speed simulator
+  const driverIdRef = useRef(null);
+  const tripIdRef = useRef(null);
+
+  /* Live GPS: resolve driver + active trip, then stream real position */
   useEffect(() => {
+    let active = true;
+    let watchId = null;
+
+    const resolveContext = async () => {
+      try {
+        const saved = localStorage.getItem('cargolink_driver_user') || localStorage.getItem('cargolink_user');
+        const parsed = saved ? JSON.parse(saved) : null;
+        const userId = parsed?.user?.id || parsed?.id;
+        if (!userId) return;
+
+        const res = await apiClient.get(`/api/drivers/user/${userId}`);
+        const driver = res.driver;
+        if (!driver) return;
+        driverIdRef.current = driver._id;
+
+        const tripsRes = await apiClient.get(`/api/trips/driver/${driver._id}`);
+        const trips = tripsRes.trips || [];
+        const activeTrip = trips.find(t =>
+          ['ASSIGNED', 'IN_TRANSIT', 'DELAYED'].includes((t.status || '').toUpperCase())
+        );
+        if (activeTrip) tripIdRef.current = activeTrip._id;
+      } catch (err) {
+        console.warn('Failed to resolve GPS tracking context', err);
+      }
+    };
+
+    const reportPosition = async (pos) => {
+      if (!active) return;
+      const tripId = tripIdRef.current;
+      const kmh = Math.round((pos.coords.speed || 0) * 3.6);
+      setSpeed(kmh || 62);
+      setGpsFix({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+      if (!tripId) return;
+      try {
+        await apiClient.post('/api/tracking/update', {
+          tripId,
+          driverId: driverIdRef.current,
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          speed: pos.coords.speed || 0,
+          heading: pos.coords.heading || 0,
+          accuracy: pos.coords.accuracy || 0,
+        });
+      } catch (err) {
+        console.warn('Failed to send GPS fix', err);
+      }
+    };
+
+    const startWatch = () => {
+      if (!('geolocation' in navigator)) {
+        setGpsStatus('off');
+        return;
+      }
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          setGpsStatus('live');
+          reportPosition(pos);
+        },
+        (err) => {
+          console.warn('Geolocation error', err);
+          setGpsStatus('off');
+        },
+        { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
+      );
+    };
+
+    resolveContext().then(() => {
+      if (!active) return;
+      startWatch();
+    });
+
+    return () => {
+      active = false;
+      if (watchId != null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, []);
+
+  /* Fallback speed simulator when GPS is unavailable */
+  useEffect(() => {
+    if (gpsStatus !== 'off') return;
     const interval = setInterval(() => {
       setSpeed(Math.floor(55 + Math.random() * 20));
     }, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [gpsStatus]);
+
+  const mapCenter = gpsFix && gpsStatus === 'live'
+    ? [gpsFix.lat, gpsFix.lng]
+    : DEFAULT_POSITION;
 
   return (
     <div className="app-screen" style={{ position: 'relative', backgroundColor: '#F4F1ED' }}>
 
-      {/* Full Screen Interactive Map Simulation */}
+      {/* Full Screen Live GPS Map */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, overflow: 'hidden' }}>
-        <div style={{
-          width: '100%', height: '100%',
-          background: 'linear-gradient(180deg, #C8DCC8 0%, #D8E8D0 20%, #E8EFDC 40%, #F0EBD8 65%, #EDE0C8 85%, #E0D4B8 100%)',
-        }}>
-          <svg width="100%" height="100%" viewBox="0 0 400 850" preserveAspectRatio="xMidYMid slice">
-            <rect x="0" y="0" width="400" height="850" fill="#D4E8D4" />
-            <rect x="280" y="100" width="100" height="80" rx="4" fill="#B8D4B8" opacity="0.7" />
-            <rect x="10" y="200" width="80" height="60" rx="4" fill="#C0D8C0" opacity="0.6" />
-            <rect x="150" y="500" width="120" height="90" rx="4" fill="#B8D4B8" opacity="0.5" />
-            {[[30,150,60,40],[110,150,50,40],[200,140,70,50],[295,160,80,40],[30,320,55,35],[100,310,70,45],[200,300,60,50],[290,305,80,40],[30,480,60,40],[110,470,50,45],[190,465,80,50],[300,470,75,40]].map(([x,y,w,h],i)=>(
-              <rect key={i} x={x} y={y} width={w} height={h} rx="3" fill="#E8E0D0" stroke="#D4C8B4" strokeWidth="0.5" />
-            ))}
-            {/* Highway Route */}
-            <path d="M 200 900 Q 210 700 195 550 Q 185 420 200 300 Q 215 180 205 80" stroke="#C8B898" strokeWidth="22" fill="none" strokeLinecap="round" />
-            <path d="M 200 900 Q 210 700 195 550 Q 185 420 200 300 Q 215 180 205 80" stroke="white" strokeWidth="18" fill="none" strokeLinecap="round" />
-            {/* Active Route Highlight */}
-            <path d="M 200 600 Q 195 500 200 400 Q 210 280 205 180" stroke="#8B5E3C" strokeWidth="6" fill="none" strokeLinecap="round" strokeOpacity="0.9" />
+        <MapContainer
+          key="driver-nav-map"
+          center={mapCenter}
+          zoom={15}
+          style={{ width: '100%', height: '100%' }}
+          zoomControl={false}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
 
-            {/* Markers */}
-            <circle cx="205" cy="200" r="14" fill="#4CAF50" />
-            <circle cx="205" cy="200" r="6" fill="white" />
-            <circle cx="200" cy="80" r="14" fill="#E65100" />
-            <circle cx="200" cy="80" r="6" fill="white" />
+          <MapFollowPosition position={mapCenter} />
 
-            {/* Truck Location */}
-            <circle cx="197" cy="590" r="20" fill="white" stroke="#8B5E3C" strokeWidth="3" />
-            <text x="197" y="596" textAnchor="middle" fontSize="16" fill="#8B5E3C">🚛</text>
-          </svg>
-        </div>
+          {gpsFix && gpsStatus === 'live' ? (
+            <>
+              <Circle
+                center={[gpsFix.lat, gpsFix.lng]}
+                radius={gpsFix.accuracy || 25}
+                pathOptions={{ color: '#2E7D32', fillColor: '#2E7D32', fillOpacity: 0.15, weight: 1.5 }}
+              />
+              <Marker position={[gpsFix.lat, gpsFix.lng]} icon={truckMarkerIcon} />
+            </>
+          ) : (
+            <Marker position={DEFAULT_POSITION} icon={truckMarkerIcon} />
+          )}
+        </MapContainer>
+
+        {/* GPS Off overlay */}
+        {gpsStatus === 'off' && (
+          <div style={{
+            position: 'absolute', inset: 0, zIndex: 5,
+            background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <div style={{
+              background: 'var(--white)', borderRadius: '16px', padding: '16px 22px',
+              textAlign: 'center', boxShadow: '0 8px 24px rgba(0,0,0,0.3)', maxWidth: 240
+            }}>
+              <WifiOff size={24} color="#EF5350" style={{ marginBottom: 4 }} />
+              <p className="text-poppins font-bold text-brown" style={{ margin: 0, fontSize: '0.82rem' }}>GPS Off — Demo Mode</p>
+              <p className="text-poppins" style={{ margin: '4px 0 0', fontSize: '0.68rem', opacity: 0.6 }}>
+                Enable location access to broadcast your live position
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Top Navigation Bar HUD */}
@@ -77,6 +206,23 @@ const NavigationScreen = ({ onBack, onComplete }) => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* GPS Status Badge */}
+      <div style={{
+        position: 'absolute', top: '5.75rem', left: '16px', zIndex: 10,
+        display: 'flex', alignItems: 'center', gap: '6px',
+        backgroundColor: gpsStatus === 'live'
+          ? 'rgba(46,125,50,0.92)'
+          : gpsStatus === 'connecting' ? 'rgba(245,158,11,0.92)' : 'rgba(239,83,80,0.92)',
+        color: '#fff', borderRadius: '20px', padding: '5px 12px',
+        fontSize: '0.7rem', fontWeight: 700, fontFamily: 'var(--font-poppins)',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.2)'
+      }}>
+        {gpsStatus === 'live' ? <SatelliteDish size={13} /> : gpsStatus === 'connecting' ? <Satellite size={13} /> : <WifiOff size={13} />}
+        {gpsStatus === 'live'
+          ? (gpsFix ? `GPS LIVE · ${gpsFix.lat.toFixed(4)}, ${gpsFix.lng.toFixed(4)}` : 'GPS LIVE')
+          : gpsStatus === 'connecting' ? 'GPS Connecting…' : 'GPS Off — Demo Mode'}
       </div>
 
       {/* Speedometer Badge */}

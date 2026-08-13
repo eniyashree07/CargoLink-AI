@@ -11,6 +11,7 @@
   bottom: 0;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   display: flex;
   justify-content: center;
@@ -93,19 +94,35 @@
   overflow: hidden;
 }
 
-/* Mobile viewport under 500px */
-@media (max-width: 500px) {
+/* Mobile viewport under 520px: expand to a real full-screen phone UI */
+@media (max-width: 520px) {
   .driver-app-container {
     background: var(--bg-warm);
   }
   .android-device-wrapper {
     width: 100vw;
     height: 100vh;
+    height: 100dvh;
     border-radius: 0;
     box-shadow: none;
+    border: none;
   }
   .android-notch {
     display: none;
+  }
+  .screen-scroll-area {
+    padding-top: 0;
+  }
+}
+
+/* Small phones (375px & below): tighten spacing so nothing overflows */
+@media (max-width: 380px) {
+  .screen-scroll-content {
+    padding-left: 0.9rem;
+    padding-right: 0.9rem;
+  }
+  .input-premium {
+    font-size: 0.9rem;
   }
 }
 

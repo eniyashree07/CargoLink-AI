@@ -1,0 +1,66 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CargoLINK Architecture Diagram</title>
+    <script src="https://unpkg.com/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+      body { margin: 0; padding: 20px; font-family: Arial, sans-serif; }
+      .diagram-container { width: 1200px; }
+    </style>
+  </head>
+  <body>
+    <div class="diagram-container">
+      <div class="mermaid">
+flowchart LR
+  subgraph Client
+    Browser(Browser / Mobile App)
+  end
+
+  subgraph Frontend["Frontend (frontend/)"]
+    FE_App[App.jsx]
+    FE_Services[services/*]
+    FE_Components[components/*]
+    FE_Pages[pages/*]
+    FE_Hooks[hooks/useSpeechRecognition.js]
+    FE_Public[public/ assets]
+  end
+
+  subgraph API["API Layer"]
+    API_Axios[api.js (HTTP client)]
+  end
+
+  subgraph Backend["Backend (backend/)"]
+    Server[server.js (Express)]
+    Routes[Routes: auth, trips, drivers, tracking, dashboard, voiceAssistant]
+    Middleware[middleware/auth.js]
+    Models[Models: User, Driver, Trip, Notification, CargoOwner]
+    Utils[utils/tripCode.js]
+    Scripts[scripts/backfillTripCode.js]
+  end
+
+  DB[(Database\n(e.g., MongoDB))]
+
+  Browser --> FE_App
+  FE_App --> FE_Services
+  FE_Services --> API_Axios
+  API_Axios --> Server
+  Server --> Routes
+  Routes --> Middleware
+  Routes --> Models
+  Models --> DB
+  Server --> Utils
+  Server --> Scripts
+  FE_App --> FE_Hooks
+  FE_App --> FE_Components
+  FE_App --> FE_Pages
+  FE_App --> FE_Public
+  FE_Components --> FE_Services
+      </div>
+    </div>
+    <script>
+      mermaid.initialize({ startOnLoad: true, theme: 'default' });
+    </script>
+  </body>
+</html>

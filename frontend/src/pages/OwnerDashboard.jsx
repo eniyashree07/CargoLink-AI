@@ -1,13 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, Package, Users, Map, Bell, BarChart2, User, LogOut,
-  Truck, Plus, UserPlus, Navigation2, Search, ChevronRight, ChevronLeft,
+  Truck, UserPlus, Navigation2, Search, ChevronRight, ChevronLeft,
   AlertTriangle, CheckCircle2, Clock, TrendingUp, TrendingDown, Sparkles,
-  X, Star, Activity, RefreshCw, ArrowRight, Zap, Settings, MapPin, Calendar, Info, Phone,
+  X, Star, Activity, RefreshCw, Settings, MapPin, Calendar, Info, Phone,
   Building, Mail, PhoneCall, Shield, Lock, Globe, Moon, Edit, LifeBuoy,
   Sun, Eye, EyeOff, Camera, Save, Palette, Type, Volume2, VolumeX, Monitor, Smartphone
 } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import './OwnerDashboard.css';
+import apiClient from '../services/api';
 import { dashboardService } from '../services/dashboardService';
 import { tripService } from '../services/tripService';
 import { driverService } from '../services/driverService';
@@ -153,10 +157,13 @@ const CreateLoadView = ({ setActiveNav, onLoadCreated }) => {
   });
   const [assignedSuccess, setAssignedSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createdTripCode, setCreatedTripCode] = useState(null);
+  const [createError, setCreateError] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setCreateError(null);
     try {
       const savedUser = localStorage.getItem('cargolink_owner_user') || localStorage.getItem('cargolink_user');
       let cargoOwnerId = null;
@@ -167,7 +174,15 @@ const CreateLoadView = ({ setActiveNav, onLoadCreated }) => {
       if (!cargoOwnerId) {
         throw new Error('Owner profile not found. Please log in again.');
       }
-      await tripService.createTrip({
+
+      const pickupTime = formData.pickupDate && formData.pickupTime
+        ? new Date(`${formData.pickupDate}T${formData.pickupTime}`)
+        : null;
+      const deliveryTime = formData.deliveryDate && formData.deliveryTime
+        ? new Date(`${formData.deliveryDate}T${formData.deliveryTime}`)
+        : null;
+
+      const result = await tripService.createTrip({
         origin: formData.pickup,
         destination: formData.dropoff,
         cargoType: formData.goodsType,
@@ -177,24 +192,30 @@ const CreateLoadView = ({ setActiveNav, onLoadCreated }) => {
         cargoOwnerId,
         distance: Math.floor(Math.random() * 500 + 50),
         estimatedDuration: Math.floor(Math.random() * 10 + 2),
-        cost: parseFloat(formData.weight) * (Math.floor(Math.random() * 20 + 10))
+        cost: parseFloat(formData.weight) * (Math.floor(Math.random() * 20 + 10)),
+        pickupTime,
+        deliveryTime,
       });
+      setCreatedTripCode(result.tripCode || null);
       setAssignedSuccess(true);
       setIsSubmitting(false);
       if (onLoadCreated) onLoadCreated();
       setTimeout(() => {
         setAssignedSuccess(false);
         if (setActiveNav) setActiveNav('ai');
-      }, 1200);
+      }, 1800);
     } catch (err) {
       setIsSubmitting(false);
-      alert('Failed to create load. Please try again.');
+      console.error('Create load error:', err);
+      setCreateError(err?.message || 'Failed to create load. Please try again.');
     }
   };
 
   const handleReset = () => {
     setFormData({ pickup: '', dropoff: '', goodsType: '', weight: '', truckType: '', pickupDate: '', pickupTime: '', deliveryDate: '', deliveryTime: '', instructions: '' });
     setAssignedSuccess(false);
+    setCreatedTripCode(null);
+    setCreateError(null);
   };
 
   return (
@@ -210,10 +231,17 @@ const CreateLoadView = ({ setActiveNav, onLoadCreated }) => {
         </div>
       </div>
 
+      {createError && (
+        <div className="od-cl-success-banner" style={{ marginBottom: 20, background: '#FEF2F2', color: 'var(--ow-danger)', borderColor: 'rgba(239,68,68,0.2)' }}>
+          <AlertTriangle size={20} />
+          <span>{createError}</span>
+        </div>
+      )}
+
       {assignedSuccess && (
         <div className="od-cl-success-banner" style={{ marginBottom: 20 }}>
           <CheckCircle2 size={20} color="var(--ow-success)" />
-          <span>Load created successfully! Redirecting to AI Driver Recommendation...</span>
+          <span>{createdTripCode ? `Load ${createdTripCode} created successfully! Redirecting to AI Driver Recommendation...` : 'Load created successfully! Redirecting to AI Driver Recommendation...'}</span>
         </div>
       )}
 
@@ -590,7 +618,7 @@ const TripsPageView = ({ setActiveNav, trips }) => {
           </thead>
           <tbody>
             {(trips.length > 0 ? trips : ACTIVE_TRIPS).map(trip => {
-              const tripId = trip.id || trip._id || 'N/A';
+              const tripId = trip.tripCode || trip.id || trip._id || 'N/A';
               const tripFrom = trip.origin || trip.from || 'N/A';
               const tripTo = trip.destination || trip.to || 'N/A';
               const tripDriver = trip.driver || trip.driverId?.userId?.fullName || trip.driverId?.fullName || 'Unassigned';
@@ -657,7 +685,42 @@ const TripsPageView = ({ setActiveNav, trips }) => {
 /* ═══════════════════════════════════════════════════════════════
    5. LIVE TRACKING VIEW
    ═══════════════════════════════════════════════════════════════ */
+/* ── Small helper: fly the Leaflet map to a target position ───────── */
+const RecenterLiveMap = ({ position }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (position && Array.isArray(position)) {
+      map.flyTo(position, Math.max(map.getZoom(), 8), { duration: 0.7 });
+    }
+  }, [position && position[0], position && position[1]]);
+  return null;
+};
+
+const liveTruckIcon = (truck, isSelected) => L.divIcon({
+  className: '',
+  html: `<div style="
+    background: ${truck.status === 'delayed' ? '#EF4444' : truck.status === 'completed' ? '#16A34A' : '#8B5E3C'};
+    color: #fff; border-radius: 8px; padding: 4px 10px;
+    font-size: 0.75rem; font-weight: 800; font-family: system-ui;
+    box-shadow: ${isSelected ? '0 0 0 3px rgba(139,94,60,0.4), 0 4px 12px rgba(0,0,0,0.25)' : '0 2px 8px rgba(0,0,0,0.2)'};
+    border: ${isSelected ? '2px solid #fff' : 'none'};
+    transform: ${isSelected ? 'scale(1.1)' : 'scale(1)'};
+    transition: all 0.2s;
+    white-space: nowrap;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 4px;
+  ">🚛 ${truck.id}</div>`,
+  iconSize: [86, 34],
+  iconAnchor: [43, 17],
+});
+
 const LiveTrackingView = ({ setActiveNav, trips }) => {
+  const [liveTrucks, setLiveTrucks] = useState([]);
+  const [trackingLoading, setTrackingLoading] = useState(true);
+  const [trackingError, setTrackingError] = useState('');
+  const [selectedTruck, setSelectedTruck] = useState(null);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [ownerUserId, setOwnerUserId] = useState(null);
   const [alertSent, setAlertSent] = useState(false);
 
   const handleAlert = () => {
@@ -665,98 +728,283 @@ const LiveTrackingView = ({ setActiveNav, trips }) => {
     setTimeout(() => setAlertSent(false), 2500);
   };
 
+  /* Resolve the logged-in cargo owner's User id so we only see our fleet */
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('cargolink_owner_user') || localStorage.getItem('cargolink_user');
+      const parsed = saved ? JSON.parse(saved) : null;
+      const role = (parsed?.role || parsed?.user?.role || '').toUpperCase();
+      const id = parsed?.user?.id || parsed?.id || parsed?.user?._id || parsed?._id;
+      if (id && (role === 'OWNER' || role === 'owner')) {
+        setOwnerUserId(id);
+      }
+    } catch (e) {
+      console.warn('Failed to resolve owner id for live tracking', e);
+    }
+  }, []);
+
+  const fetchLive = useCallback(async () => {
+    try {
+      setTrackingLoading(true);
+      const query = ownerUserId ? `?ownerId=${ownerUserId}` : '';
+      const res = await apiClient.get(`/api/tracking/live${query}`);
+      if (res.success) {
+        setLiveTrucks(res.trucks || []);
+        setTrackingError('');
+        setLastUpdate(new Date());
+      } else {
+        setTrackingError(res.message || 'No live tracking data available.');
+      }
+    } catch (err) {
+      setTrackingError(err.message || 'Failed to load live GPS. Is the backend running?');
+    } finally {
+      setTrackingLoading(false);
+    }
+  }, [ownerUserId]);
+
+  useEffect(() => {
+    fetchLive();
+    const refreshTimer = setInterval(fetchLive, 10000);
+    return () => clearInterval(refreshTimer);
+  }, [fetchLive]);
+
+  /* Keep the selected truck in sync with the latest API data */
+  useEffect(() => {
+    if (!selectedTruck) return;
+    const updated = liveTrucks.find(t => t.id === selectedTruck.id);
+    if (updated) setSelectedTruck(updated);
+  }, [liveTrucks]);
+
+  const activeTruck = selectedTruck || liveTrucks[0] || null;
+  const mapPosition = activeTruck && activeTruck.lat != null && activeTruck.lng != null
+    ? [activeTruck.lat, activeTruck.lng]
+    : [14.5, 78.5];
+
+  const inTransitCount = liveTrucks.filter(t => t.status === 'in-transit').length;
+  const delayedCount = liveTrucks.filter(t => t.status === 'delayed').length;
+
+  const formatLastUpdate = (iso) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (diff < 60) return `${Math.max(diff, 0)}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    return `${Math.floor(diff / 3600)}h ago`;
+  };
+
   return (
     <div className="od-create-load-page" style={{ maxWidth: 1200 }}>
       <div className="od-cl-header" style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         <button className="od-icon-btn" onClick={() => setActiveNav && setActiveNav('trips')}><ChevronLeft size={20}/></button>
         <div>
-          <h2 className="od-section-title" style={{ margin: 0 }}>Live Tracking: TR-8041</h2>
-          <p className="od-page-sub">Ramesh Kumar • TN 37 CZ 4920</p>
+          <h2 className="od-section-title" style={{ margin: 0 }}>Live Tracking</h2>
+          <p className="od-page-sub">
+            {liveTrucks.length > 0
+              ? `${liveTrucks.length} truck${liveTrucks.length === 1 ? '' : 's'} broadcasting live GPS`
+              : 'Real-time GPS positions of your fleet'}
+          </p>
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
-          <button className="od-btn ghost" onClick={handleAlert}><Bell size={16} style={{ marginRight: 6 }}/> Alert Driver</button>
-          <button className="od-btn primary" onClick={() => alert('Dialing Driver Ramesh Kumar (+91 98765 43210)...')}><Phone size={16} style={{ marginRight: 6 }}/> Call Driver</button>
+          {lastUpdate && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--ow-text-muted)', fontWeight: 600, alignSelf: 'center' }}>
+              Updated {lastUpdate.toLocaleTimeString()}
+            </span>
+          )}
+          <button className="od-btn ghost" onClick={() => setActiveNav && setActiveNav('trips')}><Truck size={16} style={{ marginRight: 6 }}/> Trips</button>
+          <button className="od-btn primary" onClick={fetchLive}><RefreshCw size={16} style={{ marginRight: 6 }}/> Refresh</button>
         </div>
       </div>
 
       {alertSent && (
         <div className="od-cl-success-banner" style={{ marginBottom: 16 }}>
           <CheckCircle2 size={18} color="var(--ow-success)" />
-          <span>High-priority alert sent to Driver Ramesh Kumar.</span>
+          <span>High-priority alert sent to {activeTruck ? activeTruck.driver : 'the driver'}.</span>
+        </div>
+      )}
+
+      {trackingError && (
+        <div className="od-cl-success-banner" style={{ marginBottom: 16, background: '#FEF2F2', color: 'var(--ow-danger)', borderColor: 'rgba(239,68,68,0.2)' }}>
+          <AlertTriangle size={18} />
+          <span>{trackingError}</span>
+        </div>
+      )}
+
+      {!trackingError && liveTrucks.length === 0 && !trackingLoading && (
+        <div className="od-card" style={{ marginBottom: 16, padding: '28px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: '2rem', marginBottom: 8 }}>📡</div>
+          <h4 style={{ margin: '0 0 6px 0', color: 'var(--ow-text-dark)' }}>No live GPS signals yet</h4>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--ow-text-muted)' }}>
+            Ask your drivers to open <strong>Navigation</strong> in the CargoLink Driver App. Their phone GPS
+            starts broadcasting here automatically — this page refreshes every 10 seconds.
+          </p>
         </div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 24 }}>
         {/* Map Area */}
         <div className="od-card" style={{ padding: 0, overflow: 'hidden', height: '600px', position: 'relative', background: '#e5e3df' }}>
-          <div style={{ width: '100%', height: '100%', backgroundImage: 'url("https://www.transparenttextures.com/patterns/cartographer.png")', opacity: 0.6 }} />
-          
-          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-            <path d="M 200,500 Q 300,450 400,200 T 700,100" fill="none" stroke="var(--ow-brown)" strokeWidth="6" strokeDasharray="12 8" />
-            <path d="M 200,500 Q 300,450 350,325" fill="none" stroke="var(--ow-brown)" strokeWidth="6" />
-          </svg>
+          {trackingLoading && liveTrucks.length === 0 && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 1200, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.6)' }}>
+              <span className="text-poppins font-bold text-brown" style={{ fontSize: '0.9rem' }}>Connecting to GPS feed…</span>
+            </div>
+          )}
 
-          <div style={{ position: 'absolute', top: 485, left: 185, background: 'var(--ow-white)', padding: '4px 10px', borderRadius: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--ow-brown)' }} /> Coimbatore
-          </div>
-          
-          <div style={{ position: 'absolute', top: 85, left: 690, background: 'var(--ow-white)', padding: '4px 10px', borderRadius: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.1)', fontSize: '0.75rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--ow-success)' }} /> Chennai
-          </div>
+          <MapContainer
+            key="owner-live-map"
+            center={mapPosition}
+            zoom={8}
+            style={{ height: '100%', width: '100%' }}
+            zoomControl
+          >
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
 
-          <div style={{ position: 'absolute', top: 310, left: 335, background: 'var(--ow-brown)', color: '#fff', padding: '8px 12px', borderRadius: 8, boxShadow: '0 4px 16px rgba(139,94,60,0.4)', fontSize: '1.2rem', animation: 'bounce 2s infinite' }}>
-            🚛
-          </div>
-          
-          <div style={{ position: 'absolute', bottom: 20, left: 20, background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(4px)', padding: '10px 16px', borderRadius: 12, boxShadow: 'var(--ow-shadow-md)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--ow-success)' }} />
-            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Traffic: Normal</span>
+            <RecenterLiveMap position={mapPosition} />
+
+            {liveTrucks.map(truck => (
+              truck.lat != null && truck.lng != null && (
+                <Marker
+                  key={truck.id}
+                  position={[truck.lat, truck.lng]}
+                  icon={liveTruckIcon(truck, selectedTruck?.id === truck.id)}
+                  eventHandlers={{ click: () => setSelectedTruck(truck) }}
+                >
+                  <Popup>
+                    <div style={{ fontFamily: 'system-ui', fontSize: '0.8rem', minWidth: 180 }}>
+                      <strong>🚛 {truck.id}</strong>
+                      <div style={{ marginTop: 4 }}>{truck.driver}</div>
+                      <div>{truck.from} → {truck.to}</div>
+                      <div style={{ color: '#8B5E3C', fontWeight: 600 }}>{truck.speed} · {truck.location}</div>
+                    </div>
+                  </Popup>
+                </Marker>
+              )
+            ))}
+          </MapContainer>
+
+          <div style={{ position: 'absolute', bottom: 16, left: 16, zIndex: 1000, background: 'rgba(255,255,255,0.92)', borderRadius: 10, padding: '10px 14px', border: '1px solid var(--ow-border)', backdropFilter: 'blur(4px)', pointerEvents: 'none' }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--ow-text-muted)', textTransform: 'uppercase', marginBottom: 6 }}>Live Fleet</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.72rem', color: 'var(--ow-text-dark)' }}>
+              <span>🚛 {liveTrucks.length} Active</span>
+              <span>⚡ {inTransitCount} In Transit</span>
+              <span>⚠️ {delayedCount} Delayed</span>
+            </div>
           </div>
         </div>
 
         {/* Sidebar Info */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div className="od-card" style={{ padding: 24 }}>
-            <h3 style={{ margin: '0 0 20px 0', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8 }}><Navigation2 size={18} color="var(--ow-brown)"/> Trip Status</h3>
-            
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Status</span>
-                <span className="od-status-chip in-transit"><span className="od-status-dot"/> Live</span>
-              </div>
-              <div style={{ height: 1, background: 'var(--ow-border)' }} />
-              
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Remaining Distance</span>
-                <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ow-text-dark)' }}>60 KM</span>
-              </div>
-              <div style={{ height: 1, background: 'var(--ow-border)' }} />
+          {activeTruck ? (
+            <>
+              <div className="od-card" style={{ padding: 24 }}>
+                <h3 style={{ margin: '0 0 20px 0', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Navigation2 size={18} color="var(--ow-brown)"/> {activeTruck.id}
+                </h3>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Estimated Arrival</span>
-                <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ow-success)' }}>04:30 PM</span>
-              </div>
-              <div style={{ height: 1, background: 'var(--ow-border)' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Status</span>
+                    <span className={`od-status-chip ${STATUS_CLASS[activeTruck.status] || 'in-transit'}`}>
+                      <span className="od-status-dot"/> {STATUS_LABEL[activeTruck.status] || 'In Transit'}
+                    </span>
+                  </div>
+                  <div style={{ height: 1, background: 'var(--ow-border)' }} />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Current Speed</span>
-                <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--ow-text-dark)' }}>55 km/h</span>
-              </div>
-            </div>
-          </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Route</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--ow-text-dark)', textAlign: 'right' }}>{activeTruck.from} → {activeTruck.to}</span>
+                  </div>
+                  <div style={{ height: 1, background: 'var(--ow-border)' }} />
 
-          <div className="od-card" style={{ padding: 24 }}>
-            <h3 style={{ margin: '0 0 20px 0', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8 }}><Users size={18} color="var(--ow-brown)"/> Driver Info</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div className="od-driver-avatar lg">RK</div>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--ow-text-dark)' }}>Ramesh Kumar</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8rem', color: 'var(--ow-brown)', marginTop: 4 }}>
-                  <Star size={12} fill="var(--ow-brown)" /> 4.9 (124 trips)
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Current Speed</span>
+                    <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--ow-text-dark)' }}>{activeTruck.speed}</span>
+                  </div>
+                  <div style={{ height: 1, background: 'var(--ow-border)' }} />
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Last GPS Update</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--ow-text-dark)' }}>{formatLastUpdate(activeTruck.lastUpdate)}</span>
+                  </div>
+                  <div style={{ height: 1, background: 'var(--ow-border)' }} />
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>GPS Accuracy</span>
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--ow-text-dark)' }}>
+                      {activeTruck.accuracy ? `±${Math.round(activeTruck.accuracy)} m` : '—'}
+                    </span>
+                  </div>
+                  <div style={{ height: 1, background: 'var(--ow-border)' }} />
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--ow-text-muted)', fontSize: '0.85rem' }}>Cargo</span>
+                    <span style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--ow-text-dark)' }}>{activeTruck.goods || '—'}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+                  <button className="od-btn ghost sm" style={{ flex: 1 }} onClick={handleAlert}><Bell size={14} style={{ marginRight: 5 }}/> Alert</button>
+                  <button className="od-btn primary sm" style={{ flex: 1 }} onClick={() => alert(`Dialing ${activeTruck.driver}...`)}><Phone size={14} style={{ marginRight: 5 }}/> Call</button>
                 </div>
               </div>
+
+              <div className="od-card" style={{ padding: 24 }}>
+                <h3 style={{ margin: '0 0 20px 0', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Users size={18} color="var(--ow-brown)"/> Driver Info
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div className="od-driver-avatar lg">{activeTruck.driverInitials || 'DR'}</div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--ow-text-dark)' }}>{activeTruck.driver}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--ow-text-muted)', marginTop: 4 }}>
+                      {activeTruck.truckNo} · {activeTruck.goods || 'Cargo'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="od-card" style={{ padding: 24, textAlign: 'center' }}>
+              <MapPin size={28} color="var(--ow-text-light)" />
+              <p style={{ fontSize: '0.85rem', color: 'var(--ow-text-muted)', margin: '10px 0 0 0' }}>
+                Select a truck marker on the map to see live details.
+              </p>
             </div>
-          </div>
+          )}
+
+          {/* Live truck list */}
+          {liveTrucks.length > 0 && (
+            <div className="od-card" style={{ padding: 16 }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--ow-text-muted)', textTransform: 'uppercase', marginBottom: 10 }}>All Live Trucks</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {liveTrucks.map(truck => (
+                  <div
+                    key={truck.id}
+                    onClick={() => setSelectedTruck(truck)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                      padding: '8px 10px', borderRadius: 10,
+                      border: selectedTruck?.id === truck.id ? '1.5px solid var(--ow-brown)' : '1px solid var(--ow-border)',
+                      background: selectedTruck?.id === truck.id ? 'var(--ow-brown-light)' : 'transparent',
+                    }}
+                  >
+                    <div className="od-driver-mini-avatar" style={{ background: truck.driverBg || 'var(--ow-brown)', color: '#fff' }}>
+                      {truck.driverInitials || 'DR'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--ow-text-dark)' }}>{truck.id}</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--ow-text-muted)' }}>{truck.from} → {truck.to}</div>
+                    </div>
+                    <span className={`od-status-chip ${STATUS_CLASS[truck.status] || 'in-transit'}`}>
+                      <span className="od-status-dot"/> {STATUS_LABEL[truck.status] || 'Live'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1995,312 +2243,6 @@ const OwnerDashboard = () => {
                 </div>
               </div>
 
-              {/* ── Dashboard Main Grid ─────────────────────── */}
-              <div className="od-dashboard-grid">
-
-                {/* LEFT: Active Trips Table */}
-                <div className="od-card">
-                  <div className="od-card-header">
-                    <h3 className="od-card-title">
-                      <Activity size={17} color="var(--ow-brown)" /> Active Trips
-                    </h3>
-                    <button className="od-section-link" onClick={() => setActiveNav('trips')}>
-                      View All <ChevronRight size={14} />
-                    </button>
-                  </div>
-
-                  <table className="od-trips-table">
-                    <thead>
-                      <tr>
-                        <th>Trip ID</th>
-                        <th>Route</th>
-                        <th>Driver</th>
-                        <th>Progress</th>
-                        <th>Status</th>
-                        <th>ETA</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(trips.length > 0 ? trips.slice(0, 5) : ACTIVE_TRIPS).map(trip => {
-                        const tripId = trip.id || trip._id || 'N/A';
-                        const tripFrom = trip.origin || trip.from || 'N/A';
-                        const tripTo = trip.destination || trip.to || 'N/A';
-              const tripDriver = trip.driver || trip.driverId?.userId?.fullName || trip.driverId?.fullName || 'Unassigned';
-                        const tripStatus = trip.status === 'IN_TRANSIT' ? 'in-transit' : trip.status === 'PENDING' ? 'pending' : trip.status === 'DELIVERED' ? 'completed' : trip.status === 'DELAYED' ? 'delayed' : (trip.status || 'pending');
-                        const tripProgress = trip.progress || (tripStatus === 'completed' ? 100 : tripStatus === 'in-transit' ? 50 : 0);
-                        const tripEta = trip.eta || 'N/A';
-                        return (
-                        <tr key={tripId} style={{ cursor: 'pointer' }} onClick={() => setActiveNav('tracking')}>
-                          <td><span className="od-trip-id">{tripId}</span></td>
-                          <td>
-                            <div className="od-trip-route">
-                              {tripFrom}
-                              <span className="od-route-arrow">→</span>
-                              {tripTo}
-                            </div>
-                          </td>
-                          <td>
-                            <div className="od-driver-cell">
-                              <div className="od-driver-mini-avatar">
-                                {tripDriver === 'Unassigned' ? '?' : tripDriver.split(' ').map(w=>w[0]).join('')}
-                              </div>
-                              <span className="od-truncate" style={{ maxWidth: 110 }}>{tripDriver}</span>
-                            </div>
-                          </td>
-                          <td>
-                            <div className="od-progress-wrap">
-                              <div className="od-progress-bar">
-                                <div
-                                  className={`od-progress-fill ${tripStatus === 'delayed' ? 'warn' : ''}`}
-                                  style={{ width: `${tripProgress}%` }}
-                                />
-                              </div>
-                              <span className="od-progress-pct">{tripProgress}%</span>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`od-status-chip ${STATUS_CLASS[tripStatus]}`}>
-                              <span className="od-status-dot" />
-                              {STATUS_LABEL[tripStatus]}
-                            </span>
-                          </td>
-                          <td style={{ color: 'var(--ow-text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
-                            {tripEta}
-                          </td>
-                        </tr>
-                      )})}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* RIGHT column: Quick Actions + AI Status */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-                  {/* Quick Actions */}
-                  <div className="od-card">
-                    <div className="od-card-header">
-                      <h3 className="od-card-title">
-                        <Zap size={17} color="var(--ow-brown)" /> Quick Actions
-                      </h3>
-                    </div>
-                    <div className="od-quick-actions-grid">
-                      <button className="od-qa-btn primary" onClick={() => setActiveNav('loads')}>
-                        <div className="od-qa-icon"><Plus size={20} /></div>
-                        <span className="od-qa-label">Create Load</span>
-                        <span className="od-qa-sub">Publish a new cargo load</span>
-                        <ArrowRight size={14} className="od-qa-arrow" />
-                      </button>
-
-                      <button className="od-qa-btn" onClick={() => setActiveNav('assign')}>
-                        <div className="od-qa-icon"><UserPlus size={20} /></div>
-                        <span className="od-qa-label">Assign Driver</span>
-                        <span className="od-qa-sub">Match driver to load</span>
-                        <ArrowRight size={14} className="od-qa-arrow" />
-                      </button>
-
-                      <button className="od-qa-btn" onClick={() => setActiveNav('tracking')}>
-                        <div className="od-qa-icon"><Navigation2 size={20} /></div>
-                        <span className="od-qa-label">Track Trips</span>
-                        <span className="od-qa-sub">Live GPS fleet view</span>
-                        <ArrowRight size={14} className="od-qa-arrow" />
-                      </button>
-
-                      <button className="od-qa-btn" onClick={() => setActiveNav('drivers')}>
-                        <div className="od-qa-icon"><Users size={20} /></div>
-                        <span className="od-qa-label">View Drivers</span>
-                        <span className="od-qa-sub">Manage fleet drivers</span>
-                        <ArrowRight size={14} className="od-qa-arrow" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* AI Fleet Status */}
-                  <div className="od-ai-card">
-                    <div className="od-ai-card-gradient" />
-
-                    <div className="od-ai-header">
-                      <div className="od-ai-title-row">
-                        <div className="od-ai-emoji-box">🤖</div>
-                        <div>
-                          <div className="od-ai-title">AI Fleet Status</div>
-                          <div className="od-ai-subtitle">Autonomous Co-Pilot Active</div>
-                        </div>
-                      </div>
-                      <div className="od-ai-live-pill">
-                        <span className="od-ai-live-dot" />
-                        Monitoring
-                      </div>
-                    </div>
-
-                    <div className="od-ai-metrics">
-                      {/* Active Trips */}
-                      <div className="od-ai-metric" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('trips')}>
-                        <div className="od-ai-metric-top">
-                          <div className="od-ai-metric-icon" style={{ background: 'rgba(139,94,60,0.1)', color: 'var(--ow-brown)' }}>
-                            <Truck size={13} />
-                          </div>
-                          Active Trips
-                        </div>
-                        <div className="od-ai-metric-val">{dashboardData?.activeTrips ?? trips.filter(t => ['IN_TRANSIT','ASSIGNED'].includes(t.status)).length}</div>
-                        <div className="od-ai-metric-sub">On the road</div>
-                      </div>
-
-                      {/* Available Drivers */}
-                      <div className="od-ai-metric" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('assign')}>
-                        <div className="od-ai-metric-top">
-                          <div className="od-ai-metric-icon" style={{ background: 'rgba(16,185,129,0.1)', color: 'var(--ow-success)' }}>
-                            <Users size={13} />
-                          </div>
-                          Avail. Drivers
-                        </div>
-                        <div className="od-ai-metric-val success">{dashboardData?.availableDrivers ?? drivers.filter(d => d.status === 'AVAILABLE').length}</div>
-                        <div className="od-ai-metric-sub">Ready to dispatch</div>
-                      </div>
-
-                      {/* Delayed Trips */}
-                      <div className="od-ai-metric" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('trips')}>
-                        <div className="od-ai-metric-top">
-                          <div className="od-ai-metric-icon" style={{ background: 'rgba(245,158,11,0.1)', color: 'var(--ow-warning)' }}>
-                            <AlertTriangle size={13} />
-                          </div>
-                          Delayed Trips
-                        </div>
-                        <div className="od-ai-metric-val warn">{dashboardData?.delayedTrips ?? trips.filter(t => t.status === 'DELAYED').length}</div>
-                        <div className="od-ai-metric-sub">Flagged by AI</div>
-                      </div>
-
-                      {/* Pending Trips */}
-                      <div className="od-ai-metric" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('loads')}>
-                        <div className="od-ai-metric-top">
-                          <div className="od-ai-metric-icon" style={{ background: 'rgba(139,94,60,0.1)', color: 'var(--ow-brown)' }}>
-                            <Package size={13} />
-                          </div>
-                          Pending
-                        </div>
-                        <div className="od-ai-metric-val">{dashboardData?.pendingTrips ?? trips.filter(t => t.status === 'PENDING').length}</div>
-                        <div className="od-ai-metric-sub">Need driver match</div>
-                      </div>
-                    </div>
-
-                    {/* AI recommendation */}
-                    <div className="od-ai-recommendation" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('ai')}>
-                      <Sparkles size={16} color="var(--ow-brown)" style={{ flexShrink: 0 }} />
-                      <span className="od-ai-rec-text">
-                        <strong>AI Insight:</strong> {trips.length} trips registered · {drivers.length} drivers in fleet
-                      </span>
-                      <ChevronRight size={16} color="var(--ow-brown)" style={{ flexShrink: 0 }} />
-                    </div>
-                  </div>
-
-                </div>
-              </div>
-
-              {/* ── Bottom Grid: Notifications + Drivers ─────── */}
-              <div className="od-bottom-grid">
-
-                {/* Recent Notifications */}
-                <div className="od-card">
-                  <div className="od-card-header">
-                    <h3 className="od-card-title">
-                      <Bell size={17} color="var(--ow-brown)" /> Fleet Notifications
-                    </h3>
-                    <button className="od-section-link" onClick={() => setActiveNav('notifications')}>
-                      All <ChevronRight size={14} />
-                    </button>
-                  </div>
-                  <div className="od-notif-list">
-                    {NOTIFICATIONS.map((n, i) => (
-                      <div className="od-notif-item" key={i} style={{ cursor: 'pointer' }} onClick={() => setActiveNav('notifications')}>
-                        <NotifIcon type={n.type} />
-                        <div className="od-notif-body">
-                          <div className="od-notif-title">{n.title}</div>
-                          <div className="od-notif-desc">{n.desc}</div>
-                        </div>
-                        <span className="od-notif-time">{n.time}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Top Drivers */}
-                <div className="od-card">
-                  <div className="od-card-header">
-                    <h3 className="od-card-title">
-                      <Users size={17} color="var(--ow-brown)" /> Fleet Drivers
-                    </h3>
-                    <button className="od-section-link" onClick={() => setActiveNav('drivers')}>
-                      Manage <ChevronRight size={14} />
-                    </button>
-                  </div>
-                  <div className="od-driver-list">
-                    {DRIVERS.map((d, i) => (
-                      <div className="od-driver-item" key={i} style={{ cursor: 'pointer' }} onClick={() => setActiveNav('drivers')}>
-                        <div className="od-driver-avatar">{d.initials}</div>
-                        <div className="od-driver-info">
-                          <div className="od-driver-name">{d.name}</div>
-                          <div className="od-driver-status">{d.status}</div>
-                        </div>
-                        <div className="od-driver-rating">
-                          <Star size={12} fill="var(--ow-brown)" color="var(--ow-brown)" />
-                          {d.rating}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Active Load Spotlight */}
-                <div className="od-card" style={{ cursor: 'pointer' }} onClick={() => setActiveNav('tracking')}>
-                  <div className="od-card-header">
-                    <h3 className="od-card-title">
-                      <Navigation2 size={17} color="var(--ow-brown)" /> Priority Load
-                    </h3>
-                    {trips.length > 0 ? <span className="od-status-chip in-transit"><span className="od-status-dot" /> Active</span> : <span className="od-status-chip pending"><span className="od-status-dot" /> No Data</span>}
-                  </div>
-                  <div className="od-card-body">
-                    {trips.length > 0 ? (
-                      <>
-                    {/* Route visualization */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--ow-brown)', margin: '0 auto 4px' }} />
-                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--ow-text-muted)' }}>{trips[0].origin || trips[0].from || 'N/A'}</span>
-                      </div>
-                      <div style={{ flex: 1, borderTop: '2px dashed var(--ow-beige)', position: 'relative' }}>
-                        <div style={{ position: 'absolute', top: -10, left: '50%', fontSize: '1rem' }}>🚛</div>
-                      </div>
-                      <div style={{ textAlign: 'center' }}>
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--ow-success)', margin: '0 auto 4px' }} />
-                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--ow-text-muted)' }}>{trips[0].destination || trips[0].to || 'N/A'}</span>
-                      </div>
-                    </div>
-
-                    {/* Trip meta */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      {[
-                        { label: 'Trip ID', val: trips[0]._id || trips[0].id || 'N/A' },
-                        { label: 'Driver', val: trips[0].driver?.fullName || trips[0].driverId?.userId?.fullName || trips[0].driverId?.fullName || trips[0].driver || 'Unassigned' },
-                        { label: 'Cargo', val: trips[0].cargoType || 'N/A' },
-                        { label: 'Weight', val: trips[0].weight ? `${trips[0].weight}T` : 'N/A' },
-                        { label: 'Status', val: trips[0].status || 'N/A' },
-                        { label: 'On-Time', val: '—' },
-                      ].map(({ label, val }) => (
-                        <div key={label} style={{ background: 'var(--ow-bg)', borderRadius: 10, padding: '10px 12px', border: '1px solid var(--ow-border)' }}>
-                          <div style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--ow-text-light)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--ow-text-dark)', marginTop: 2 }}>{val}</div>
-                        </div>
-                      ))}
-                    </div>
-                    </>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--ow-text-muted)' }}>
-                        No active trips yet. Create a load to get started.
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-              </div>
             </>
           )}
 

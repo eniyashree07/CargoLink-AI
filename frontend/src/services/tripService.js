@@ -23,7 +23,10 @@ export const tripService = {
 
   async createTrip(tripData) {
     const response = await apiClient.post('/api/trips', tripData);
-    return response.trip;
+    return {
+      ...response,
+      tripCode: response.tripCode || response.trip?.tripCode || null,
+    };
   },
 
   async updateTrip(id, tripData) {

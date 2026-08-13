@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './DriverApp.css';
 import SplashScreen from './SplashScreen';
 import LoginScreen from './LoginScreen';
+import ForgotPasswordScreen from './ForgotPasswordScreen';
 import HomeDashboard from './HomeDashboard';
 import TripDetails from './TripDetails';
 import NavigationScreen from './NavigationScreen';
@@ -95,7 +96,9 @@ const DriverApp = () => {
       case 'splash':
         return <SplashScreen onComplete={() => navigate('login')} />;
       case 'login':
-        return <LoginScreen onNext={() => navigate('home')} />;
+        return <LoginScreen onNext={() => navigate('home')} onForgotPassword={() => navigate('forgot-password')} />;
+      case 'forgot-password':
+        return <ForgotPasswordScreen onBack={() => navigate('login')} />;
       case 'home':
         return (
           <HomeDashboard

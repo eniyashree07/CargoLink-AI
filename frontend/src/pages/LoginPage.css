@@ -4,11 +4,12 @@
 
 .login-page {
   min-height: 100vh;
-  width: 100vw;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
+  overflow-x: hidden;
   overflow-y: auto;
   background-color: var(--bg-warm);
   font-family: var(--font-poppins);
@@ -258,8 +259,129 @@ select.input-field-custom {
   margin-left: 4px;
 }
 
+/* Forgot Password — OTP Inputs */
+.otp-row {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.otp-box {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 52px;
+  height: 56px;
+  text-align: center;
+  font-size: 1.25rem;
+  font-weight: 600;
+  padding: 0;
+  border-radius: 14px;
+  border: 1.5px solid rgba(139, 94, 60, 0.18);
+  background-color: #FAFAFA;
+  color: var(--text-dark-brown);
+  font-family: var(--font-poppins);
+  outline: none;
+  transition: all 0.25s ease;
+  box-sizing: border-box;
+}
+
+.otp-box:focus {
+  border-color: var(--primary-brown);
+  box-shadow: 0 0 0 3px rgba(139, 94, 60, 0.12);
+  background-color: var(--white);
+}
+
+/* ═══════════════════════════════════════════
+   DEMO LOGIN SECTION
+   ═══════════════════════════════════════════ */
+.demo-section {
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed rgba(139, 94, 60, 0.2);
+  text-align: center;
+}
+
+.demo-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-dark-brown);
+  margin-bottom: 0.75rem;
+}
+
+.demo-role-row {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.demo-btn {
+  background: #FDF6F0;
+  border: 1.5px solid rgba(139, 94, 60, 0.25);
+  border-radius: 14px;
+  padding: 0.6rem 1.1rem;
+  font-family: var(--font-poppins);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--primary-brown);
+  cursor: pointer;
+  transition: all 0.22s ease;
+}
+
+.demo-btn:hover:not(:disabled) {
+  background: var(--primary-brown);
+  color: var(--white);
+  transform: translateY(-2px);
+  box-shadow: 0 5px 16px rgba(139, 94, 60, 0.3);
+}
+
+.demo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.demo-note {
+  margin: 0.65rem 0 0;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+/* ═══════════════════════════════════════════
+   RESPONSIVE BREAKPOINTS
+   ═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .login-page { padding: 1.75rem 1rem; }
+  .login-card { padding: 2rem 1.5rem !important; }
+}
+
 @media (max-width: 540px) {
   .form-grid { grid-template-columns: 1fr; }
   .form-group-full { grid-column: span 1; }
   .login-card { padding: 1.75rem 1.25rem !important; }
+  .otp-row { gap: 8px; }
+}
+
+@media (max-width: 400px) {
+  .login-page { padding: 1rem 0.75rem; }
+  .login-content { max-width: 100%; }
+  .login-card { padding: 1.5rem 1rem !important; }
+  .login-header h1 { font-size: 1.4rem !important; }
+  .role-btn { font-size: 0.78rem; }
+  .auth-tab { font-size: 0.88rem; padding: 0.65rem; }
+  .input-field-custom { font-size: 0.85rem; padding: 0.8rem 0.9rem; }
+  .input-icon-wrapper .input-field-custom { padding-left: 40px !important; }
+  .btn-auth-submit { font-size: 0.92rem; padding: 0.9rem; }
+  .otp-row { gap: 6px; }
+  .otp-box { max-width: 44px; height: 50px; font-size: 1.15rem; }
+}
+
+@media (max-width: 350px) {
+  .otp-box { max-width: 40px; height: 46px; font-size: 1.05rem; }
+  .otp-row { gap: 5px; }
 }
