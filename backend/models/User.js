@@ -14,12 +14,11 @@ const userSchema = new mongoose.Schema({
   },
   mobile: {
     type: String,
-    required: true,
-    unique: true
+    default: ''
   },
   password: {
     type: String,
-    required: true
+    default: null
   },
   role: {
     type: String,
@@ -33,6 +32,14 @@ const userSchema = new mongoose.Schema({
   active: {
     type: Boolean,
     default: true
+  },
+  resetOtp: {
+    type: String,
+    default: null
+  },
+  resetOtpExpires: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
@@ -40,7 +47,7 @@ const userSchema = new mongoose.Schema({
 
 // Hash password before saving
 userSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  if (!this.isModified('password') || !this.password) return next();
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
   next();
@@ -48,6 +55,7 @@ userSchema.pre('save', async function(next) {
 
 // Method to compare password
 userSchema.methods.comparePassword = async function(candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 

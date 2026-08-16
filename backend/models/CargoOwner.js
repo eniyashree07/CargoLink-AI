@@ -9,15 +9,15 @@ const cargoOwnerSchema = new mongoose.Schema({
   },
   companyName: {
     type: String,
-    required: true
+    default: ''
   },
   gstNumber: {
     type: String,
-    required: true
+    default: ''
   },
   companyAddress: {
     type: String,
-    required: true
+    default: ''
   }
 }, {
   timestamps: true

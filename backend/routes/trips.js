@@ -2,12 +2,22 @@ const express = require('express');
 const router = express.Router();
 const Trip = require('../models/Trip');
 const Driver = require('../models/Driver');
+const CargoOwner = require('../models/CargoOwner');
 const auth = require('../middleware/auth');
+const { generateTripCode, isValidTripCode } = require('../utils/tripCode');
 
 const tripPopulate = [
   { path: 'cargoOwnerId' },
   { path: 'driverId', populate: { path: 'userId', select: 'fullName email mobile' } }
 ];
+
+function isDuplicateKeyError(error) {
+  return error && error.code === 11000;
+}
+
+function toDuplicateKeyMessage() {
+  return 'Unable to create load due to a unique code conflict. Please try again.';
+}
 
 // Get Trips by Cargo Owner
 router.get('/owner/:cargoOwnerId', auth, async (req, res) => {
@@ -81,18 +91,68 @@ router.get('/:id', auth, async (req, res) => {
 
 // Create Trip
 router.post('/', auth, async (req, res) => {
+  const MAX_RETRIES = 3;
   try {
-    const trip = new Trip(req.body);
-    await trip.save();
-    res.status(201).json({
-      success: true,
-      message: 'Trip created successfully',
-      trip
+    const tripData = { ...req.body };
+
+    // Resolve the cargo owner from the authenticated user's token so the trip
+    // always stores the real CargoOwner profile id (the client may send the
+    // User id or nothing — either way the server resolves the correct owner).
+    if (req.user && req.user.userId) {
+      const owner = await CargoOwner.findOne({ userId: req.user.userId });
+      if (owner) tripData.cargoOwnerId = owner._id;
+    }
+
+    // Always generate a fresh tripCode on the backend so the frontend never
+    // needs to supply one (unique: true on the schema prevents null duplicates).
+    tripData.tripCode = isValidTripCode(tripData.tripCode) ? tripData.tripCode : generateTripCode();
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        tripData.tripCode = generateTripCode();
+      }
+
+      try {
+        const trip = new Trip(tripData);
+        if (!isValidTripCode(trip.tripCode)) {
+          trip.tripCode = generateTripCode();
+        }
+        await trip.save();
+        return res.status(201).json({
+          success: true,
+          message: 'Load created successfully',
+          tripCode: trip.tripCode,
+          trip
+        });
+      } catch (saveError) {
+        if (isDuplicateKeyError(saveError)) {
+          if (attempt < MAX_RETRIES) {
+            console.warn(`Duplicate tripCode "${tripData.tripCode}" detected, retrying with a new code (attempt ${attempt + 1}/${MAX_RETRIES})`);
+            continue;
+          }
+          return res.status(409).json({
+            success: false,
+            message: toDuplicateKeyMessage()
+          });
+        }
+        throw saveError;
+      }
+    }
+
+    return res.status(409).json({
+      success: false,
+      message: toDuplicateKeyMessage()
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
+    if (isDuplicateKeyError(error)) {
+      return res.status(409).json({
+        success: false,
+        message: toDuplicateKeyMessage()
+      });
+    }
+    res.status(400).json({
+      success: false,
+      message: error.message || 'Failed to create load'
     });
   }
 });

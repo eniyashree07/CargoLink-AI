@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
+const { generateTripCode } = require('../utils/tripCode');
 
 const tripSchema = new mongoose.Schema({
+  tripCode: {
+    type: String,
+    required: true,
+    unique: true
+  },
   cargoOwnerId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'CargoOwner',
@@ -54,6 +60,13 @@ const tripSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+tripSchema.pre('validate', function (next) {
+  if (!this.tripCode || typeof this.tripCode !== 'string' || this.tripCode.trim() === '') {
+    this.tripCode = generateTripCode();
+  }
+  next();
 });
 
 module.exports = mongoose.model('Trip', tripSchema);

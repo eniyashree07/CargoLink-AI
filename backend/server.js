@@ -20,8 +20,16 @@ const fallbackDbUri = 'mongodb://127.0.0.1:27017/cargolink';
 mongoose.set('strictQuery', false);
 
 const mongooseOptions = {
-  serverSelectionTimeoutMS: 10000,
-  connectTimeoutMS: 10000,
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  // How long to try selecting a server (ms)
+  serverSelectionTimeoutMS: 30000,
+  // How long before an open socket is timed out (ms)
+  socketTimeoutMS: 45000,
+  // Prefer IPv4 (helps on some Windows networks)
+  family: 4,
+  // Don't buffer model function calls when disconnected — fail fast
+  bufferCommands: false,
 };
 
 async function connectToDatabase(uri) {

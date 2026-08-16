@@ -9,15 +9,15 @@ const driverSchema = new mongoose.Schema({
   },
   drivingLicence: {
     type: String,
-    required: true
+    default: ''
   },
   truckNumber: {
     type: String,
-    required: true
+    default: ''
   },
   vehicleType: {
     type: String,
-    required: true
+    default: 'Mini Truck'
   },
   rating: {
     type: Number,

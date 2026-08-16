@@ -1,5 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const LiveLocation = require('../models/LiveLocation');
+const Trip = require('../models/Trip');
+const CargoOwner = require('../models/CargoOwner');
 
 const CITY_COORDS = {
   'Coimbatore': [11.0168, 76.9558],
@@ -109,7 +112,140 @@ function generateTruckState(truck, tick) {
 
 let tick = 0;
 
-router.get('/live', (req, res) => {
+/* ── Real GPS: driver app pushes its phone GPS fix here ────────────── */
+router.post('/update', async (req, res) => {
+  try {
+    const { tripId, driverId, lat, lng, speed, heading, accuracy } = req.body;
+
+    if (!tripId || lat == null || lng == null) {
+      return res.status(400).json({
+        success: false,
+        message: 'tripId, lat and lng are required'
+      });
+    }
+    if (isNaN(Number(lat)) || isNaN(Number(lng))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid coordinates'
+      });
+    }
+
+    await LiveLocation.findOneAndUpdate(
+      { tripId },
+      {
+        $set: {
+          driverId: driverId || null,
+          lat: Number(lat),
+          lng: Number(lng),
+          speed: Number(speed) || 0,
+          heading: Number(heading) || 0,
+          accuracy: Number(accuracy) || 0,
+          source: 'browser-gps',
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    // A live GPS fix means the truck is actually moving — mark it in transit
+    await Trip.updateOne(
+      { _id: tripId, status: { $in: ['ASSIGNED', 'PENDING'] } },
+      { $set: { status: 'IN_TRANSIT' } }
+    );
+
+    res.json({ success: true, message: 'Location updated' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ── GET /live: real GPS positions (merged with trip details) ──────── */
+router.get('/live', async (req, res) => {
+  try {
+    const locations = await LiveLocation.find().sort({ updatedAt: -1 }).lean();
+
+    const realTrucks = [];
+    if (locations.length > 0) {
+      const tripIds = locations.map(loc => loc.tripId);
+      const trips = await Trip.find({ _id: { $in: tripIds } })
+        .populate([
+          { path: 'driverId', populate: { path: 'userId', select: 'fullName mobile' } },
+        ])
+        .lean();
+
+      // Resolve the cargo owner. Trips may store either the CargoOwner profile id
+      // OR (legacy bug) the User id, so look both ways.
+      const rawOwnerIds = trips.map(t => t.cargoOwnerId).filter(Boolean);
+      const owners = rawOwnerIds.length
+        ? await CargoOwner.find({ $or: [{ _id: { $in: rawOwnerIds } }, { userId: { $in: rawOwnerIds } }] }).lean()
+        : [];
+      const ownerMap = {};
+      owners.forEach(o => {
+        ownerMap[String(o._id)] = o;
+        ownerMap[String(o.userId)] = o;
+      });
+
+      const tripMap = {};
+      trips.forEach(trip => { tripMap[String(trip._id)] = trip; });
+
+      locations.forEach(loc => {
+        const trip = tripMap[String(loc.tripId)];
+        if (!trip) return;
+
+        const owner = ownerMap[String(trip.cargoOwnerId)] || null;
+
+        // Optional server-side filter: ?ownerId=<User id of the cargo owner>
+        if (req.query.ownerId && String(owner?.userId || '') !== String(req.query.ownerId)) return;
+        if (req.query.tripId && String(trip._id) !== String(req.query.tripId)) return;
+
+        const driver = trip.driverId;
+        const driverName = driver?.userId?.fullName || driver?.fullName || 'Driver';
+        const truckNo = driver?.truckNumber || '—';
+        const driverInitials = driverName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+        const tripStatus = (trip.status || '').toUpperCase();
+        const status = tripStatus === 'DELAYED' ? 'delayed'
+          : tripStatus === 'DELIVERED' ? 'completed'
+          : 'in-transit';
+
+        realTrucks.push({
+          id: trip.tripCode,
+          tripId: trip._id,
+          cargoOwnerId: owner?._id || null,
+          ownerUserId: owner?.userId || null,
+          driverId: driver?._id || null,
+          driver: driverName,
+          driverInitials,
+          driverBg: '#8B5E3C',
+          from: trip.origin,
+          to: trip.destination,
+          status,
+          speed: `${Math.round(loc.speed || 0)} km/h`,
+          eta: 'Live',
+          location: `Live GPS · ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`,
+          progress: tripStatus === 'DELIVERED' ? 100 : tripStatus === 'IN_TRANSIT' ? 50 : 30,
+          truckNo,
+          goods: trip.cargoType,
+          lat: loc.lat,
+          lng: loc.lng,
+          accuracy: loc.accuracy,
+          source: loc.source,
+          lastUpdate: loc.updatedAt,
+        });
+      });
+    }
+
+    res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      trucks: realTrucks,
+      count: realTrucks.length,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+/* ── Simulated fleet (fallback / demo when no real GPS is reporting) ─ */
+router.get('/live/simulated', (req, res) => {
   tick++;
   const data = TRUCKS.map(truck => generateTruckState(truck, tick));
   res.json({
